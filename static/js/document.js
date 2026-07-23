@@ -13,7 +13,11 @@ function uid() {
 
 function newDocument(width = 900, height = 600) {
   const layer = { id: uid(), name: "Layer 1", visible: true, objects: [] };
-  return { width, height, layers: [layer], activeLayerId: layer.id, selectedId: null };
+  return { width, height, layers: [layer], activeLayerId: layer.id, selectedIds: [] };
+}
+
+function selectedObjects() {
+  return doc.selectedIds.map(id => findObject(id)?.obj).filter(Boolean);
 }
 
 function activeLayer() {
@@ -38,6 +42,65 @@ function removeObject(id) {
     const i = layer.objects.findIndex(o => o.id === id);
     if (i >= 0) { layer.objects.splice(i, 1); return; }
   }
+}
+
+
+function getRotation(obj) {
+  return obj.attrs.rotation ? parseFloat(obj.attrs.rotation) : 0;
+}
+
+function setRotation(obj, deg) {
+  obj.attrs.rotation = deg;
+}
+
+function bboxCenter(bbox) {
+  return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+}
+
+function bringForward(id) {
+  const found = findObject(id);
+  if (!found) return;
+  const { obj, layer } = found;
+  const i = layer.objects.indexOf(obj);
+  if (i < layer.objects.length - 1) {
+    layer.objects.splice(i, 1);
+    layer.objects.splice(i + 1, 0, obj);
+  }
+}
+
+function sendBackward(id) {
+  const found = findObject(id);
+  if (!found) return;
+  const { obj, layer } = found;
+  const i = layer.objects.indexOf(obj);
+  if (i > 0) {
+    layer.objects.splice(i, 1);
+    layer.objects.splice(i - 1, 0, obj);
+  }
+}
+
+function bringToFront(id) {
+  const found = findObject(id);
+  if (!found) return;
+  const { obj, layer } = found;
+  layer.objects.splice(layer.objects.indexOf(obj), 1);
+  layer.objects.push(obj);
+}
+
+function sendToBack(id) {
+  const found = findObject(id);
+  if (!found) return;
+  const { obj, layer } = found;
+  layer.objects.splice(layer.objects.indexOf(obj), 1);
+  layer.objects.unshift(obj);
+}
+
+function moveLayer(layerId, direction) {
+  // direction: -1 moves toward back (index 0), +1 moves toward front
+  const i = doc.layers.findIndex(l => l.id === layerId);
+  const j = i + direction;
+  if (i < 0 || j < 0 || j >= doc.layers.length) return;
+  [doc.layers[i], doc.layers[j]] = [doc.layers[j], doc.layers[i]];
 }
 
 // snapshot-based undo/redo — simple and cheap at prototype scale

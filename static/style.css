@@ -63,6 +63,9 @@ button.active{ background:var(--accent); }
 }
 #layers-list li.active{ background:var(--accent); }
 #layers-list li button{ box-shadow:none; padding:2px 6px; }
+#layers-list li[draggable="true"] { cursor: grab; }
+#layers-list li.drag-over { border-top: 2px solid #4682f0; }
+
 
 .text-editor{
   position:absolute; border:2px dashed var(--accent2); background:#fff;
@@ -219,3 +222,8 @@ button.active{ background:var(--accent); }
   border:2px solid var(--ink);
   box-shadow:none;
 }
+
+
+.marquee-box { fill: rgba(70,130,240,0.12); stroke: #4682f0; stroke-width: 1; stroke-dasharray: 4,2; }
+.rotation-handle { fill: #fff; stroke: #4682f0; stroke-width: 1.5; cursor: grab; }
+.rotation-stem { stroke: #4682f0; stroke-width: 1; stroke-dasharray: 2,2; }

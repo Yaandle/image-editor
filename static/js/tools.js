@@ -36,28 +36,105 @@ const tools = {
     down(e) {
       const handle = e.target.dataset.handle;
       const id = e.target.dataset.id;
-      if (handle) {
-        const el = canvasEl.querySelector(`[data-id="${doc.selectedId}"]`);
-        dragState = { mode: "resize", handle, bbox: el.getBBox() };
+
+      if (handle === "rotate") {
+        const el = canvasEl.querySelector(`[data-id="${doc.selectedIds[0]}"]`);
+        const bb = el.getBBox();
+        const center = bboxCenter(bb);
+        dragState = { mode: "rotate", center, startAngle: getRotation(findObject(doc.selectedIds[0]).obj) };
         return;
       }
-      doc.selectedId = id || null;
-      if (id) dragState = { mode: "move", start: toDocPoint(e) };
+
+      if (handle) {
+        const boxes = doc.selectedIds.map(sid => canvasEl.querySelector(`[data-id="${sid}"]`)?.getBBox()).filter(Boolean);
+        const gx = Math.min(...boxes.map(b => b.x)), gy = Math.min(...boxes.map(b => b.y));
+        const gx1 = Math.max(...boxes.map(b => b.x+b.width)), gy1 = Math.max(...boxes.map(b => b.y+b.height));
+        dragState = {
+          mode: "resize", handle,
+          groupBBox: { x: gx, y: gy, width: gx1-gx, height: gy1-gy },
+          starts: doc.selectedIds.map(sid => ({ id: sid, bbox: canvasEl.querySelector(`[data-id="${sid}"]`).getBBox() })),
+        };
+        return;
+      }
+
+      if (id) {
+        if (e.shiftKey) {
+          doc.selectedIds = doc.selectedIds.includes(id)
+            ? doc.selectedIds.filter(x => x !== id)
+            : [...doc.selectedIds, id];
+        } else if (!doc.selectedIds.includes(id)) {
+          doc.selectedIds = [id];
+        }
+        dragState = { mode: "move", start: toDocPoint(e) };
+        renderDoc();
+        return;
+      }
+
+      // empty canvas: start rubber-band
+      if (!e.shiftKey) doc.selectedIds = [];
+      dragState = { mode: "marquee", start: toDocPoint(e), baseIds: [...doc.selectedIds] };
       renderDoc();
     },
+
     move(e) {
-      if (!dragState || !doc.selectedId) return;
-      const { obj } = findObject(doc.selectedId);
+      if (!dragState) return;
+      if (!doc.selectedIds.length && dragState.mode !== "marquee") return;
+
       const p = toDocPoint(e);
+
+      if (dragState.mode === "rotate") {
+        const { obj } = findObject(doc.selectedIds[0]);
+        const angleRad = Math.atan2(p.y - dragState.center.y, p.x - dragState.center.x);
+        let deg = (angleRad * 180 / Math.PI) + 90; // +90 so pointer-up = 0deg
+        if (e.shiftKey) deg = Math.round(deg / 15) * 15; // snap every 15° when holding shift
+        setRotation(obj, deg);
+        renderDoc();
+        return;
+      }
+
       if (dragState.mode === "move") {
-        moveObject(obj, p.x - dragState.start.x, p.y - dragState.start.y);
+        const dx = p.x - dragState.start.x, dy = p.y - dragState.start.y;
+        for (const obj of selectedObjects()) moveObject(obj, dx, dy);
         dragState.start = p;
-      } else {
-        resizeObject(obj, dragState.handle, dragState.bbox, p);
+        renderDoc();
+        return;
+      }
+
+      if (dragState.mode === "marquee") {
+        const rect = normalizeRect(dragState.start, p);
+        drawMarquee(rect);
+        const hitIds = allObjectIds().filter(id => {
+          const el = canvasEl.querySelector(`[data-id="${id}"]`);
+          return el && rectsIntersect(rect, el.getBBox());
+        });
+        doc.selectedIds = [...new Set([...dragState.baseIds, ...hitIds])];
+        renderSelectionOverlay();
+        return;
+      }
+
+      // resize
+      const gb = dragState.groupBBox;
+      const fx = dragState.handle.includes("w") ? gb.x+gb.width : gb.x;
+      const fy = dragState.handle.includes("n") ? gb.y+gb.height : gb.y;
+      const newW = Math.max(1, Math.abs(p.x - fx));
+      const newH = Math.max(1, Math.abs(p.y - fy));
+      const scaleX = (p.x < fx ? -1 : 1) * newW / gb.width;
+      const scaleY = (p.y < fy ? -1 : 1) * newH / gb.height;
+
+      for (const { id, bbox } of dragState.starts) {
+        const { obj } = findObject(id);
+        scaleObjectWithinGroup(obj, bbox, fx, fy, scaleX, scaleY);
       }
       renderDoc();
     },
-    up() { if (dragState) pushUndo(); dragState = null; },
+
+    up() {
+      if (dragState && dragState.mode === "marquee") {
+        document.getElementById("marquee-box")?.remove();
+      }
+      if (dragState) pushUndo();
+      dragState = null;
+    },
   },
 
   rect: shapeTool("rect", (a, b) => ({
@@ -122,6 +199,65 @@ const tools = {
     move() {}, up() {},
   },
 };
+
+function scaleObjectWithinGroup(obj, origBBox, originX, originY, scaleX, scaleY) {
+  // offset of this object's original position from the group's fixed corner
+  const offX = (origBBox.x - Math.min(originX, originX)) ;
+  // simpler: compute new x/y by scaling the object's distance from origin
+  const newX = originX + (origBBox.x - originX) * scaleX;
+  const newY = originY + (origBBox.y - originY) * scaleY;
+  const newW = origBBox.width * Math.abs(scaleX);
+  const newH = origBBox.height * Math.abs(scaleY);
+
+  if (obj.type === "rect" || obj.type === "image") {
+    obj.attrs.x = Math.min(newX, newX + (origBBox.width*scaleX < 0 ? newW : 0));
+    obj.attrs.y = Math.min(newY, newY + (origBBox.height*scaleY < 0 ? newH : 0));
+    obj.attrs.width = newW; obj.attrs.height = newH;
+  } else if (obj.type === "ellipse") {
+    obj.attrs.cx = originX + (origBBox.x + origBBox.width/2 - originX) * scaleX;
+    obj.attrs.cy = originY + (origBBox.y + origBBox.height/2 - originY) * scaleY;
+    obj.attrs.rx = (origBBox.width/2) * Math.abs(scaleX);
+    obj.attrs.ry = (origBBox.height/2) * Math.abs(scaleY);
+  } else if (obj.type === "line") {
+    obj.attrs.x1 = originX + (parseFloat(obj.attrs.x1) - originX) * scaleX;
+    obj.attrs.y1 = originY + (parseFloat(obj.attrs.y1) - originY) * scaleY;
+    obj.attrs.x2 = originX + (parseFloat(obj.attrs.x2) - originX) * scaleX;
+    obj.attrs.y2 = originY + (parseFloat(obj.attrs.y2) - originY) * scaleY;
+  }
+  // text/path: position-only shift for now, until per-type resize (next rung) lands
+  else if (obj.type === "text") {
+    obj.attrs.x = originX + (parseFloat(obj.attrs.x) - originX) * scaleX;
+    obj.attrs.y = originY + (parseFloat(obj.attrs.y) - originY) * scaleY;
+  }
+}
+
+function normalizeRect(a, b) {
+    return {
+      x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+      width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y),
+    };
+  }
+
+  function rectsIntersect(a, b) {
+    return !(b.x > a.x + a.width || b.x + b.width < a.x || b.y > a.y + a.height || b.y + b.height < a.y);
+  }
+
+  function allObjectIds() {
+    return doc.layers.filter(l => l.visible).flatMap(l => l.objects.map(o => o.id));
+  }
+
+  function drawMarquee(rect) {
+    let el = document.getElementById("marquee-box");
+    if (!el) {
+      el = document.createElementNS(svgNS, "rect");
+      el.id = "marquee-box";
+      el.setAttribute("class", "marquee-box");
+      canvasEl.appendChild(el);
+    }
+    el.setAttribute("x", rect.x); el.setAttribute("y", rect.y);
+    el.setAttribute("width", rect.width); el.setAttribute("height", rect.height);
+  }
+
 
 function shapeTool(type, makeAttrs) {
   return {
