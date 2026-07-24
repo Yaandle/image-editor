@@ -1,9 +1,15 @@
+// canvas.js
 // Renders the document model into the live <svg id="canvas">.
 // This *is* the exportable artwork — what you see is what you export.
+//
+// Architecture invariant: objects store raw SVG attributes and are copied
+// straight onto the element. Rotation is the sole exception — it's applied
+// as a transform in a second pass, after DOM attach, so getBBox() reads
+// correctly before rotation is applied.
 
 const svgNS = "http://www.w3.org/2000/svg";
 const canvasEl = document.getElementById("canvas");
-const TAGS = { rect:"rect", ellipse:"ellipse", line:"line", path:"path", text:"text", image:"image" };
+const TAGS = { rect: "rect", ellipse: "ellipse", line: "line", path: "path", text: "text", image: "image" };
 
 function renderDoc() {
   canvasEl.setAttribute("width", doc.width);
@@ -83,8 +89,8 @@ function renderSelectionOverlay() {
   box.setAttribute("class", "selection-box");
   overlay.appendChild(box);
 
-  const corners = [[gb.x,gb.y],[gb.x+gb.width,gb.y],[gb.x,gb.y+gb.height],[gb.x+gb.width,gb.y+gb.height]];
-  ["nw","ne","sw","se"].forEach((name, i) => {
+  const corners = [[gb.x, gb.y], [gb.x + gb.width, gb.y], [gb.x, gb.y + gb.height], [gb.x + gb.width, gb.y + gb.height]];
+  ["nw", "ne", "sw", "se"].forEach((name, i) => {
     const h = document.createElementNS(svgNS, "circle");
     h.setAttribute("cx", corners[i][0]); h.setAttribute("cy", corners[i][1]); h.setAttribute("r", 5);
     h.setAttribute("class", "selection-handle");
@@ -96,7 +102,7 @@ function renderSelectionOverlay() {
   if (doc.selectedIds.length === 1) {
     const rx = gb.x + gb.width / 2, ry = gb.y - 20;
     const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", gb.x + gb.width/2); line.setAttribute("y1", gb.y);
+    line.setAttribute("x1", gb.x + gb.width / 2); line.setAttribute("y1", gb.y);
     line.setAttribute("x2", rx); line.setAttribute("y2", ry);
     line.setAttribute("class", "rotation-stem");
     overlay.appendChild(line);

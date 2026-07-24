@@ -1,3 +1,4 @@
+// export.js
 // SVG/PNG/JPEG export, plus save/load against the FastAPI backend.
 
 function download(blob, filename) {
@@ -10,6 +11,8 @@ function serializeSVG() {
   const clone = canvasEl.cloneNode(true);
   clone.querySelector("#selection-overlay")?.remove();
   clone.querySelector("#pen-preview")?.remove();
+  clone.querySelector("#pencil-preview")?.remove();
+  clone.querySelector("#marquee-box")?.remove();
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   return new XMLSerializer().serializeToString(clone);
 }
@@ -24,7 +27,7 @@ function exportRaster(type) {
     const c = document.createElement("canvas");
     c.width = doc.width; c.height = doc.height;
     const ctx = c.getContext("2d");
-    if (type === "jpeg") { ctx.fillStyle = "#fff"; ctx.fillRect(0,0,c.width,c.height); }
+    if (type === "jpeg") { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); }
     ctx.drawImage(img, 0, 0);
     c.toBlob(blob => download(blob, `${projectName()}.${type === "jpeg" ? "jpg" : "png"}`), `image/${type}`, 0.92);
   };

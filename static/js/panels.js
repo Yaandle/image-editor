@@ -1,3 +1,4 @@
+// panels.js
 // Toolbar wiring, layers panel, image import, keyboard shortcuts.
 
 document.querySelectorAll(".tool").forEach(btn => btn.addEventListener("click", () => setTool(btn.dataset.tool)));
@@ -5,20 +6,30 @@ document.getElementById("btn-undo").addEventListener("click", undo);
 document.getElementById("btn-redo").addEventListener("click", redo);
 
 document.getElementById("btn-add-layer").addEventListener("click", () => {
-  const layer = { id: uid(), name: `Layer ${doc.layers.length+1}`, visible: true, objects: [] };
+  const layer = { id: uid(), name: `Layer ${doc.layers.length + 1}`, visible: true, objects: [] };
   doc.layers.push(layer); doc.activeLayerId = layer.id;
   pushUndo(); renderLayers(); renderDoc();
 });
 
+// ---------------------------------------------------------------------
+// bug #3 fix: layer delete/visibility toggle was breaking because the
+// whole <li> was draggable="true", so a small mouse move during what the
+// user meant as a click on ▲/▼/👁/✕ could register as a dragstart instead.
+// Fix: only a dedicated drag-handle icon is draggable; the <li> itself
+// is not. Drop handler now also validates indices via moveLayerToIndex()
+// (document.js) instead of splicing directly with unchecked indices.
+// ---------------------------------------------------------------------
+
 function renderLayers() {
   const list = document.getElementById("layers-list");
   list.innerHTML = "";
-  [...doc.layers].reverse().forEach((layer, displayIndex) => {
+  [...doc.layers].reverse().forEach((layer) => {
     const li = document.createElement("li");
     li.className = layer.id === doc.activeLayerId ? "active" : "";
-    li.draggable = true;
+    li.draggable = false; // only the handle below is draggable
     li.dataset.layerId = layer.id;
-    li.innerHTML = `<span style="flex:1">${layer.name}</span>
+    li.innerHTML = `<span class="drag-handle" title="Drag to reorder" draggable="true">⠿</span>
+      <span style="flex:1">${layer.name}</span>
       <button data-act="up" title="Move layer up">▲</button>
       <button data-act="down" title="Move layer down">▼</button>
       <button data-act="vis">${layer.visible ? "👁" : "🚫"}</button>
@@ -36,24 +47,26 @@ function renderLayers() {
     });
     // displayIndex 0 is topmost/frontmost in the reversed list, so "up" (toward front) is direction +1
     li.querySelector('[data-act="up"]').addEventListener("click", () => {
-      moveLayer(layer.id, 1); pushUndo(); renderDoc(); renderLayers();
+      if (moveLayer(layer.id, 1)) { pushUndo(); renderDoc(); renderLayers(); }
     });
     li.querySelector('[data-act="down"]').addEventListener("click", () => {
-      moveLayer(layer.id, -1); pushUndo(); renderDoc(); renderLayers();
+      if (moveLayer(layer.id, -1)) { pushUndo(); renderDoc(); renderLayers(); }
     });
 
-    // drag-to-reorder
-    li.addEventListener("dragstart", e => e.dataTransfer.setData("text/layer-id", layer.id));
+    // drag-to-reorder — handle only, not the whole row
+    const handle = li.querySelector(".drag-handle");
+    handle.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("text/layer-id", layer.id);
+      e.dataTransfer.effectAllowed = "move";
+    });
     li.addEventListener("dragover", e => e.preventDefault());
     li.addEventListener("drop", e => {
       e.preventDefault();
       const draggedId = e.dataTransfer.getData("text/layer-id");
-      if (draggedId === layer.id) return;
+      if (!draggedId || draggedId === layer.id) return;
       const from = doc.layers.findIndex(l => l.id === draggedId);
       const to = doc.layers.findIndex(l => l.id === layer.id);
-      const [moved] = doc.layers.splice(from, 1);
-      doc.layers.splice(to, 0, moved);
-      pushUndo(); renderDoc(); renderLayers();
+      if (moveLayerToIndex(from, to)) { pushUndo(); renderDoc(); renderLayers(); }
     });
 
     list.appendChild(li);
@@ -71,7 +84,7 @@ document.getElementById("file-input").addEventListener("change", e => {
       const w = Math.min(img.naturalWidth, doc.width * 0.8);
       const h = w * (img.naturalHeight / img.naturalWidth);
       addObject({ id: uid(), type: "image",
-        attrs: { x:(doc.width-w)/2, y:(doc.height-h)/2, width:w, height:h, href:reader.result } });
+        attrs: { x: (doc.width - w) / 2, y: (doc.height - h) / 2, width: w, height: h, href: reader.result } });
       pushUndo(); renderDoc();
     };
     img.src = reader.result;
@@ -87,7 +100,7 @@ window.addEventListener("keydown", e => {
   if ((e.key === "Escape" || e.key === "Enter") && currentTool === "pen") tools.pen.finish();
   if ((e.key === "Delete" || e.key === "Backspace") && doc.selectedIds.length) {
     for (const id of doc.selectedIds) removeObject(id);
-    doc.selectedIds = []; pushUndo(); renderDoc();
+    clearSelection(); pushUndo(); renderDoc();
     return;
   }
   if (e.ctrlKey && e.key === "]") { // bring forward
@@ -106,6 +119,7 @@ window.addEventListener("keydown", e => {
     for (const id of doc.selectedIds) sendToBack(id);
     pushUndo(); renderDoc(); e.preventDefault(); return;
   }
-  const map = { v:"select", r:"rect", e:"ellipse", l:"line", p:"pen", t:"text", f:"fill" };
+  // v=select r=rect e=ellipse l=line p=pen(anchor) b=pencil(free-draw) t=text f=fill
+  const map = { v: "select", r: "rect", e: "ellipse", l: "line", p: "pen", b: "pencil", t: "text", f: "fill" };
   if (map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
 });
