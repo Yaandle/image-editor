@@ -63,8 +63,8 @@ button.active{ background:var(--accent); }
 }
 #layers-list li.active{ background:var(--accent); }
 #layers-list li button{ box-shadow:none; padding:2px 6px; }
-#layers-list li[draggable="true"] { cursor: grab; }
-#layers-list li.drag-over { border-top: 2px solid #4682f0; }
+.drag-handle{ cursor:grab; padding:0 2px; }
+.drag-handle:active{ cursor:grabbing; }
 
 
 .text-editor{

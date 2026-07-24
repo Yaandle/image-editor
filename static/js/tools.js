@@ -8,9 +8,11 @@
 
 let currentTool = "select";
 let dragState = null;
+let dragDidChange = false; // tracks whether a drag actually mutated anything, to avoid no-op undo pushes
 
 function setTool(name) {
   currentTool = name;
+  tools.pen.cancel?.();
   clearSelection();
   document.querySelectorAll(".tool").forEach(b => b.classList.toggle("active", b.dataset.tool === name));
   canvasEl.className = `tool-${name}`;
@@ -25,15 +27,72 @@ function currentStyle() {
   };
 }
 
+ensureToolStyles();
+
 canvasEl.addEventListener("pointerdown", e => tools[currentTool]?.down(e));
-canvasEl.addEventListener("pointermove", e => tools[currentTool]?.move(e));
+canvasEl.addEventListener("pointermove", e => {
+  updateHoverCursor(e);
+  tools[currentTool]?.move(e);
+});
 window.addEventListener("pointerup", e => tools[currentTool]?.up(e));
 canvasEl.addEventListener("dblclick", e => {
   const id = e.target.dataset.id;
+  if (currentTool === "pen") { tools.pen.finish(); return; }
   if (!id) return;
   const { obj } = findObject(id);
   if (obj.type === "text") editTextInline(obj);
 });
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    if (currentTool === "pen" && tools.pen.points.length) { tools.pen.cancel(); return; }
+    if (dragState) { cancelDrag(); return; }
+  }
+  if (e.key === "Enter" && currentTool === "pen") tools.pen.finish();
+});
+
+// Cursor feedback: crosshair for draw tools, resize/rotate cursor when
+// hovering a handle, grab cursor over a selected object body — MS Paint
+// gives constant visual feedback about what a click will do.
+function ensureToolStyles() {
+  if (document.getElementById("inkkit-tool-styles")) return;
+  const style = document.createElement("style");
+  style.id = "inkkit-tool-styles";
+  style.textContent = `
+    #canvas.tool-select { cursor: default; }
+    #canvas.tool-rect, #canvas.tool-ellipse, #canvas.tool-line,
+    #canvas.tool-pen, #canvas.tool-pencil { cursor: crosshair; }
+    #canvas.tool-text { cursor: text; }
+    #canvas.tool-fill { cursor: cell; }
+    #canvas [data-id]:not(.broken-image-placeholder) { cursor: move; }
+    .marquee-box {
+      fill: var(--nm-accent-soft, rgba(91,141,239,0.15));
+      stroke: var(--nm-accent, #5b8def);
+      stroke-width: 1;
+      stroke-dasharray: 4 3;
+      vector-effect: non-scaling-stroke;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function updateHoverCursor(e) {
+  if (currentTool !== "select") return;
+  const cursor = e.target?.dataset?.cursor;
+  canvasEl.style.cursor = cursor || (e.target?.dataset?.id ? "move" : "default");
+}
+
+// Reverts to the state at drag-start without touching the undo stack —
+// used by Escape-to-cancel so an aborted drag doesn't leave a phantom
+// snapshot or a half-applied transform.
+function cancelDrag() {
+  if (dragState?.snapshot) {
+    doc = JSON.parse(dragState.snapshot);
+  }
+  document.getElementById("marquee-box")?.remove();
+  dragState = null;
+  dragDidChange = false;
+  renderDoc();
+}
 
 // ---------------------------------------------------------------------
 // select tool
@@ -44,12 +103,13 @@ const tools = {
     down(e) {
       const handle = e.target.dataset.handle;
       const id = e.target.dataset.id;
+      const snapshot = JSON.stringify(doc); // cheap pre-drag snapshot, only used if Escape cancels
 
       if (handle === "rotate") {
         const el = canvasEl.querySelector(`[data-id="${doc.selectedIds[0]}"]`);
         const bb = el.getBBox();
         const center = bboxCenter(bb);
-        dragState = { mode: "rotate", center, startAngle: getRotation(findObject(doc.selectedIds[0]).obj) };
+        dragState = { mode: "rotate", center, startAngle: getRotation(findObject(doc.selectedIds[0]).obj), snapshot };
         return;
       }
 
@@ -61,6 +121,7 @@ const tools = {
           mode: "resize", handle,
           groupBBox: { x: gx, y: gy, width: gx1 - gx, height: gy1 - gy },
           starts: doc.selectedIds.map(sid => ({ id: sid, bbox: canvasEl.querySelector(`[data-id="${sid}"]`).getBBox() })),
+          snapshot,
         };
         return;
       }
@@ -71,14 +132,15 @@ const tools = {
         } else if (!doc.selectedIds.includes(id)) {
           selectOnly(id);
         }
-        dragState = { mode: "move", start: toDocPoint(e) };
+        dragState = { mode: "move", start: toDocPoint(e), snapshot };
         renderDoc();
         return;
       }
 
-      // empty canvas: start rubber-band
+      // empty canvas: start rubber-band. A click that never moves resolves
+      // to a plain deselect in up() rather than pushing a marquee undo step.
       if (!e.shiftKey) clearSelection();
-      dragState = { mode: "marquee", start: toDocPoint(e), baseIds: [...doc.selectedIds] };
+      dragState = { mode: "marquee", start: toDocPoint(e), baseIds: [...doc.selectedIds], moved: false, snapshot };
       renderDoc();
     },
 
@@ -94,12 +156,14 @@ const tools = {
         let deg = (angleRad * 180 / Math.PI) + 90; // +90 so pointer-up = 0deg
         if (e.shiftKey) deg = Math.round(deg / 15) * 15; // snap every 15° when holding shift
         setRotation(obj, deg);
+        dragDidChange = true;
         renderDoc();
         return;
       }
 
       if (dragState.mode === "move") {
         const dx = p.x - dragState.start.x, dy = p.y - dragState.start.y;
+        if (dx || dy) dragDidChange = true;
         for (const obj of selectedObjects()) moveObject(obj, dx, dy);
         dragState.start = p;
         renderDoc();
@@ -107,6 +171,7 @@ const tools = {
       }
 
       if (dragState.mode === "marquee") {
+        dragState.moved = true;
         const rect = normalizeRect(dragState.start, p);
         drawMarquee(rect);
         const hitIds = allObjectIds().filter(id => {
@@ -129,11 +194,20 @@ const tools = {
       const clampedX = Math.min(Math.max(p.x, 0), doc.width);
       const clampedY = Math.min(Math.max(p.y, 0), doc.height);
 
-      const newW = Math.max(1, Math.abs(clampedX - fx));
-      const newH = Math.max(1, Math.abs(clampedY - fy));
+      let newW = Math.max(1, Math.abs(clampedX - fx));
+      let newH = Math.max(1, Math.abs(clampedY - fy));
+
+      // Shift: constrain resize to the group's original aspect ratio —
+      // matches MS Paint / most editors' proportional-resize modifier.
+      if (e.shiftKey && gb.width && gb.height) {
+        const ratio = gb.width / gb.height;
+        if (newW / newH > ratio) newW = newH * ratio; else newH = newW / ratio;
+      }
+
       const scaleX = (clampedX < fx ? -1 : 1) * newW / gb.width;
       const scaleY = (clampedY < fy ? -1 : 1) * newH / gb.height;
 
+      dragDidChange = true;
       for (const { id, bbox } of dragState.starts) {
         const { obj } = findObject(id);
         scaleObjectWithinGroup(obj, bbox, fx, fy, scaleX, scaleY);
@@ -142,26 +216,46 @@ const tools = {
     },
 
     up() {
-      if (dragState && dragState.mode === "marquee") {
+      if (dragState?.mode === "marquee") {
         document.getElementById("marquee-box")?.remove();
       }
-      if (dragState) pushUndo();
+      // Only commit to undo history if the drag actually changed something —
+      // a bare click or a marquee that never grew is a no-op, not a step.
+      if (dragState && dragDidChange) pushUndo();
       dragState = null;
+      dragDidChange = false;
     },
   },
 
-  rect: shapeTool("rect", (a, b) => ({
-    x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
-    width: Math.abs(b.x - a.x) || 1, height: Math.abs(b.y - a.y) || 1,
-  })),
-  ellipse: shapeTool("ellipse", (a, b) => ({
-    cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,
-    rx: Math.abs(b.x - a.x) / 2 || 1, ry: Math.abs(b.y - a.y) / 2 || 1,
-  })),
-  line: shapeTool("line", (a, b) => ({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })),
+  rect: shapeTool("rect", (a, b, shiftKey) => {
+    let w = b.x - a.x, h = b.y - a.y;
+    if (shiftKey) { const s = Math.max(Math.abs(w), Math.abs(h)); w = Math.sign(w || 1) * s; h = Math.sign(h || 1) * s; }
+    return {
+      x: Math.min(a.x, a.x + w), y: Math.min(a.y, a.y + h),
+      width: Math.abs(w) || 1, height: Math.abs(h) || 1,
+    };
+  }),
+  ellipse: shapeTool("ellipse", (a, b, shiftKey) => {
+    let rx = Math.abs(b.x - a.x) / 2 || 1, ry = Math.abs(b.y - a.y) / 2 || 1;
+    if (shiftKey) { const r = Math.max(rx, ry); rx = r; ry = r; }
+    return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, rx, ry };
+  }),
+  line: shapeTool("line", (a, b, shiftKey) => {
+    let x2 = b.x, y2 = b.y;
+    if (shiftKey) {
+      // snap to nearest 45° — matches the rotate-handle's 15° snap in spirit
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+      x2 = a.x + Math.cos(angle) * dist;
+      y2 = a.y + Math.sin(angle) * dist;
+    }
+    return { x1: a.x, y1: a.y, x2, y2 };
+  }),
 
   // -------------------------------------------------------------------
   // pen — click-to-place-anchor, straight-line segments (Illustrator-style)
+  // Finish via double-click, Enter, or Escape (cancel).
   // -------------------------------------------------------------------
   pen: {
     points: [],
@@ -188,14 +282,18 @@ const tools = {
         pushUndo();
       }
       this.points = [];
+      document.getElementById("pen-preview")?.remove();
       renderDoc();
+    },
+    cancel() {
+      this.points = [];
+      document.getElementById("pen-preview")?.remove();
     },
   },
 
   // -------------------------------------------------------------------
   // pencil — free-draw, continuous path following the pointer while
   // dragging. Separate tool from pen (own shortcut, see panels.js).
-  // Bug-#2 fix: this is the new tool; pen (anchor mode) is untouched.
   // -------------------------------------------------------------------
   pencil: {
     isDrawing: false,
@@ -359,6 +457,8 @@ function drawMarquee(rect) {
 
 // ---------------------------------------------------------------------
 // shape tool factory (rect / ellipse / line)
+// makeAttrs(start, current, shiftKey) — shiftKey enables square/circle/
+// 45°-line constraint, matching MS Paint's shape-tool modifier behavior.
 // ---------------------------------------------------------------------
 
 function shapeTool(type, makeAttrs) {
@@ -366,12 +466,12 @@ function shapeTool(type, makeAttrs) {
     start: null, obj: null,
     down(e) {
       this.start = toDocPoint(e);
-      this.obj = addObject({ id: uid(), type, attrs: { ...makeAttrs(this.start, this.start), ...currentStyle() } });
+      this.obj = addObject({ id: uid(), type, attrs: { ...makeAttrs(this.start, this.start, false), ...currentStyle() } });
       renderDoc();
     },
     move(e) {
       if (!this.start) return;
-      Object.assign(this.obj.attrs, makeAttrs(this.start, toDocPoint(e)));
+      Object.assign(this.obj.attrs, makeAttrs(this.start, toDocPoint(e), e.shiftKey));
       renderDoc();
     },
     up() {
@@ -383,42 +483,15 @@ function shapeTool(type, makeAttrs) {
 }
 
 // ---------------------------------------------------------------------
-// move (drag) — unchanged
+// move (drag)
 // ---------------------------------------------------------------------
 
 function moveObject(obj, dx, dy) {
-  const a = obj.attrs;
-  if (obj.type === "rect" || obj.type === "image" || obj.type === "text") { a.x = +a.x + dx; a.y = +a.y + dy; }
-  else if (obj.type === "ellipse") { a.cx = +a.cx + dx; a.cy = +a.cy + dy; }
-  else if (obj.type === "line") { a.x1 = +a.x1 + dx; a.y1 = +a.y1 + dy; a.x2 = +a.x2 + dx; a.y2 = +a.y2 + dy; }
-  else if (obj.type === "path") {
-    a.d = a.d.replace(/(-?\d+\.?\d*)[, ](-?\d+\.?\d*)/g, (_, x, y) => `${(+x) + dx},${(+y) + dy}`);
-  }
-}
-
-// resizeObject() — single-object resize path, kept for reference/reuse.
-// Not currently wired to any UI (group resize above supersedes it for
-// the multi-select case). Left in place since it's smaller and simpler
-// for a future single-object-only fast path; not a dead-code removal
-// candidate without confirming nothing else calls it.
-function resizeObject(obj, handle, startBBox, p) {
-  if (obj.type === "rect" || obj.type === "image") {
-    const x0 = startBBox.x, y0 = startBBox.y, x1 = x0 + startBBox.width, y1 = y0 + startBBox.height;
-    const fx = handle.includes("w") ? x1 : x0, fy = handle.includes("n") ? y1 : y0;
-    obj.attrs.x = clamp(Math.min(p.x, fx), 0, doc.width);
-    obj.attrs.y = clamp(Math.min(p.y, fy), 0, doc.height);
-    obj.attrs.width = clamp(Math.abs(p.x - fx), 1, doc.width);
-    obj.attrs.height = clamp(Math.abs(p.y - fy), 1, doc.height);
-  } else if (obj.type === "ellipse") {
-    const cx = startBBox.x + startBBox.width / 2, cy = startBBox.y + startBBox.height / 2;
-    obj.attrs.rx = clamp(Math.abs(p.x - cx), 1, doc.width / 2);
-    obj.attrs.ry = clamp(Math.abs(p.y - cy), 1, doc.height / 2);
-  }
-  // line/path/text: resize handles are a good next rung — skipped for now
+  nudgeObject(obj, dx, dy); // shared with document.js's duplicateObject() — one path for position math
 }
 
 // ---------------------------------------------------------------------
-// text editing — unchanged
+// text editing
 // ---------------------------------------------------------------------
 
 function editTextInline(obj) {
@@ -440,7 +513,7 @@ function editTextInline(obj) {
 }
 
 // ---------------------------------------------------------------------
-// raster flood fill — unchanged
+// raster flood fill
 // ---------------------------------------------------------------------
 
 function hexToRgb(hex) {
@@ -453,6 +526,7 @@ function floodFillImage(obj, point, fillHex) {
     const localX = point.x - parseFloat(obj.attrs.x);
     const localY = point.y - parseFloat(obj.attrs.y);
     const img = new Image();
+    img.onerror = () => resolve(); // broken/missing source — nothing to fill, don't hang the caller
     img.onload = () => {
       const w = img.naturalWidth, h = img.naturalHeight;
       const c = document.createElement("canvas");

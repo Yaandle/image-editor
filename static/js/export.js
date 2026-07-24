@@ -1,6 +1,8 @@
 // export.js
 // SVG/PNG/JPEG export, plus save/load against the FastAPI backend.
 
+ensureExportStyles();
+
 function download(blob, filename) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
@@ -23,13 +25,19 @@ function exportSVG() {
 
 function exportRaster(type) {
   const img = new Image();
+  img.onerror = () => flashStatus("Export failed — couldn't render canvas to image");
   img.onload = () => {
     const c = document.createElement("canvas");
     c.width = doc.width; c.height = doc.height;
     const ctx = c.getContext("2d");
+    // JPEG has no alpha channel — fill white first so transparent regions
+    // don't render black. PNG/SVG paths skip this and keep transparency.
     if (type === "jpeg") { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); }
     ctx.drawImage(img, 0, 0);
-    c.toBlob(blob => download(blob, `${projectName()}.${type === "jpeg" ? "jpg" : "png"}`), `image/${type}`, 0.92);
+    c.toBlob(blob => {
+      if (!blob) { flashStatus("Export failed — couldn't encode image"); return; }
+      download(blob, `${projectName()}.${type === "jpeg" ? "jpg" : "png"}`);
+    }, `image/${type}`, 0.92);
   };
   img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(serializeSVG())));
 }
@@ -42,28 +50,102 @@ function projectName() {
   return document.getElementById("project-name").value.trim() || "untitled";
 }
 
+// True once anything has actually been added or drawn — a fresh
+// newDocument() is a single empty layer with no objects. Used to skip
+// the confirm dialog on New/Load when there's nothing to lose.
+function isDocEmpty() {
+  return doc.layers.length <= 1 && doc.layers.every(l => l.objects.length === 0);
+}
+
 async function saveProject() {
-  await fetch(`/api/projects/${encodeURIComponent(projectName())}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(doc),
-  });
-  refreshProjectList();
+  const btn = document.getElementById("btn-save");
+  setBusy(btn, true, "Saving…");
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectName())}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(doc),
+    });
+    if (!res.ok) throw new Error(`Save failed (${res.status})`);
+    flashStatus(`Saved "${projectName()}"`);
+    await refreshProjectList();
+  } catch (err) {
+    flashStatus(err.message || "Save failed");
+  } finally {
+    setBusy(btn, false, "Save");
+  }
 }
 
 async function refreshProjectList() {
-  const names = await (await fetch("/api/projects")).json();
-  document.getElementById("project-list").innerHTML =
-    `<option value="">Load…</option>` + names.map(n => `<option>${n}</option>`).join("");
+  try {
+    const res = await fetch("/api/projects");
+    if (!res.ok) throw new Error("Couldn't load project list");
+    const names = await res.json();
+    document.getElementById("project-list").innerHTML =
+      `<option value="">Load…</option>` + names.map(n => `<option>${escapeAttr(n)}</option>`).join("");
+  } catch (err) {
+    flashStatus(err.message || "Couldn't refresh project list");
+  }
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Minimal busy-state toggle — prevents double-submit on slow save/load.
+// Reuses whatever label the button already had via a data attribute so
+// we don't need a second source of truth for "idle" text.
+function setBusy(btn, busy, label) {
+  btn.disabled = busy;
+  if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent;
+  btn.textContent = busy ? label : btn.dataset.idleLabel;
 }
 
 document.getElementById("btn-save").addEventListener("click", saveProject);
+
 document.getElementById("project-list").addEventListener("change", async e => {
-  if (!e.target.value) return;
-  doc = await (await fetch(`/api/projects/${e.target.value}`)).json();
-  document.getElementById("project-name").value = e.target.value;
-  undoStack = []; redoStack = [];
-  renderDoc(); renderLayers();
+  const name = e.target.value;
+  if (!name) return;
+  if (!isDocEmpty() && !confirm("Load this project? Unsaved changes will be lost.")) {
+    e.target.value = "";
+    return;
+  }
+  const select = e.target;
+  setBusy(select, true, "Loading…");
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(`Couldn't load "${name}" (${res.status})`);
+    const loaded = await res.json();
+    if (!loaded || !Array.isArray(loaded.layers)) throw new Error(`"${name}" isn't a valid project file`);
+    doc = loaded;
+    document.getElementById("project-name").value = name;
+    undoStack = []; redoStack = [];
+    renderDoc(); renderLayers();
+  } catch (err) {
+    flashStatus(err.message || "Load failed");
+    select.value = "";
+  } finally {
+    setBusy(select, false, "Load…");
+  }
 });
+
 document.getElementById("btn-new").addEventListener("click", () => {
+  if (!isDocEmpty() && !confirm("Start a new document? Unsaved changes will be lost.")) return;
   doc = newDocument(); undoStack = []; redoStack = [];
+  document.getElementById("project-name").value = "";
   renderDoc(); renderLayers();
 });
+
+// ---------------------------------------------------------------------
+// neo-morphism styling for save/export/new controls — same token set as
+// canvas.js/panels.js. Scoped under .io-btn so it can't collide if
+// index.html's actual button classes differ from panels.js's .tool.
+// ---------------------------------------------------------------------
+
+function ensureExportStyles() {
+  if (document.getElementById("inkkit-export-styles")) return;
+  const style = document.createElement("style");
+  style.id = "inkkit-export-styles";
+  style.textContent = `
+
+  `;
+  document.head.appendChild(style);
+}
