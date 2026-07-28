@@ -73,13 +73,14 @@ function saveList(key, list) {
   try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
 }
 
-export function createColorPicker(containerEl, { initialColor = '#ffffff', onChange = () => {}, onCommit = () => {} } = {}) {
+export function createColorPicker(containerEl, { initialColor = '#ffffff', onChange = () => {}, onCommit = () => {}, onNone = () => {} } = {}) {
   containerEl.innerHTML = '';
   containerEl.classList.add('vk-colorpicker');
 
   const rgb0 = hexToRgb(initialColor);
   let { h, s, v } = rgbToHsv(rgb0.r, rgb0.g, rgb0.b);
   let currentHex = initialColor;
+  let isNone = false; // true once the "None" swatch is picked — getColor() reflects this
   let recentSaveTimer = null;
 
   // ── Trigger swatch + popover shell ──────────────────────────────────────
@@ -201,6 +202,19 @@ export function createColorPicker(containerEl, { initialColor = '#ffffff', onCha
   const recentRow  = addSection('Recent');
   const paletteRow = addSection('Palette');
   const savedRow   = addSection('Saved');
+  const noneRow = addSection('None');
+  const noneSwatchBtn = document.createElement('button');
+  noneSwatchBtn.className = 'vk-cp-color-swatch vk-cp-none-swatch';
+  noneSwatchBtn.title = 'No color';
+  noneSwatchBtn.textContent = '⌀';
+  noneSwatchBtn.addEventListener('click', () => {
+    isNone = true;
+    swatchBtn.classList.add('is-none');
+    onNone();
+    popover.style.display = 'none';
+  });
+  noneRow.appendChild(noneSwatchBtn);
+
 
   const addCurrentBtn = document.createElement('button');
   addCurrentBtn.type = 'button';
@@ -238,6 +252,7 @@ export function createColorPicker(containerEl, { initialColor = '#ffffff', onCha
     saveList(RECENT_KEY, list);
     renderRecent();
   }
+
   function pushSaved(hex) {
     let list = loadList(SAVED_KEY).filter(c => c.toLowerCase() !== hex.toLowerCase());
     list.unshift(hex);
@@ -253,9 +268,11 @@ export function createColorPicker(containerEl, { initialColor = '#ffffff', onCha
     svThumb.style.left = `${s * 100}%`;
     svThumb.style.top  = `${(1 - v) * 100}%`;
     hueInput.value = h;
+    swatchBtn.classList.remove('is-none');
   }
 
   function emit(commitToExternal) {
+    isNone = false; // emit() always represents picking a real colour, not "None"
     const rgb = hsvToRgb(h, s, v);
     currentHex = rgbToHex(rgb.r, rgb.g, rgb.b);
     swatchBtn.style.background = currentHex;
@@ -310,7 +327,7 @@ export function createColorPicker(containerEl, { initialColor = '#ffffff', onCha
 
   return {
     setColor: hex => setFromHex(hex, false),
-    getColor: () => currentHex,
+    getColor: () => isNone ? 'none' : currentHex,
     destroy: () => { containerEl.innerHTML = ''; popover.remove(); },
   };
 }

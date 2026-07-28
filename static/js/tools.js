@@ -27,6 +27,65 @@ function currentStyle() {
   };
 }
 
+// ---------------------------------------------------------------------
+// property panel reactivity (bug #2 fix): currentStyle() above already
+// reads these three inputs for newly-created objects, but nothing ever
+// routed a change on them back onto an existing selection —
+// updateObjectAttrs() (document.js) was written for exactly this and was
+// never actually called anywhere. "input" applies the change live, so a
+// drag on the colour input previews instantly; "change" is where we
+// commit to undo history — the same live/commit split already used by
+// the hue slider and hex field in colorPicker.js.
+//
+// Only the single attribute that actually fired is patched, not the
+// whole currentStyle() bundle — so nudging stroke-width can't also
+// silently stomp a fill of "none" back to whatever hex happens to be
+// sitting in the (native, non-"none"-capable) fill-color input.
+// ---------------------------------------------------------------------
+
+function applyPropertyChange(attrName, value, commit) {
+  if (!doc || !doc.selectedIds.length) return;
+  for (const id of doc.selectedIds) updateObjectAttrs(id, { [attrName]: value });
+  renderDoc();
+  if (commit) pushUndo();
+}
+
+document.getElementById("fill-color").addEventListener("input", e => applyPropertyChange("fill", e.target.value, false));
+document.getElementById("fill-color").addEventListener("change", e => applyPropertyChange("fill", e.target.value, true));
+document.getElementById("stroke-color").addEventListener("input", e => applyPropertyChange("stroke", e.target.value, false));
+document.getElementById("stroke-color").addEventListener("change", e => applyPropertyChange("stroke", e.target.value, true));
+document.getElementById("stroke-width").addEventListener("input", e => applyPropertyChange("stroke-width", e.target.value, false));
+document.getElementById("stroke-width").addEventListener("change", e => applyPropertyChange("stroke-width", e.target.value, true));
+
+// The other half of "object state and UI state remain synchronised":
+// makes the panel reflect the *selected* object's actual style instead of
+// stale/default values. Called from canvas.js's renderSelectionOverlay()
+// after every selection change — single-select reflects that object,
+// multi-select reflects the first member (matching how an edit then
+// applies uniformly to the whole selection). Skips a field when the
+// object's value is "none" — a native <input type="color"> has no way to
+// represent that; see bug #3, which moves the no-fill state into
+// colorPicker.js's picker instead.
+function syncPropertyPanelToSelection() {
+  if (!doc || !doc.selectedIds.length) return;
+  const obj = selectedObjects()[0];
+  if (!obj) return;
+
+  const fillEl = document.getElementById("fill-color");
+  const strokeEl = document.getElementById("stroke-color");
+  const widthEl = document.getElementById("stroke-width");
+
+  if (obj.attrs.fill && obj.attrs.fill !== "none" && fillEl.value !== obj.attrs.fill) {
+    fillEl.value = obj.attrs.fill;
+  }
+  if (obj.attrs.stroke && obj.attrs.stroke !== "none" && strokeEl.value !== obj.attrs.stroke) {
+    strokeEl.value = obj.attrs.stroke;
+  }
+  if (obj.attrs["stroke-width"] != null && String(widthEl.value) !== String(obj.attrs["stroke-width"])) {
+    widthEl.value = obj.attrs["stroke-width"];
+  }
+}
+
 ensureToolStyles();
 
 canvasEl.addEventListener("pointerdown", e => tools[currentTool]?.down(e));
@@ -92,6 +151,34 @@ function cancelDrag() {
   dragState = null;
   dragDidChange = false;
   renderDoc();
+}
+
+// ---------------------------------------------------------------------
+// pencil path builder — shared by preview and commit so they can never
+// visually diverge. Smoothing toggle: quadratic-Bézier midpoint
+// smoothing vs raw jagged line segments (MS Paint style).
+// ---------------------------------------------------------------------
+
+let penSmoothing = true; // toggled via panels.js — see "smoothing toggle hookup" note
+
+function buildPencilPath(points) {
+  if (points.length < 2) return "";
+  if (!penSmoothing) {
+    return points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+  }
+  // Quadratic Bézier midpoint smoothing: each raw point becomes a control
+  // point, with the curve passing through the midpoint of each consecutive
+  // pair. Endpoints (first/last) are pinned exactly so the stroke starts
+  // and ends where the pointer actually did.
+  let d = `M${points[0].x},${points[0].y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const p0 = points[i], p1 = points[i + 1];
+    const midX = (p0.x + p1.x) / 2, midY = (p0.y + p1.y) / 2;
+    d += ` Q${p0.x},${p0.y} ${midX},${midY}`;
+  }
+  const last = points[points.length - 1];
+  d += ` L${last.x},${last.y}`; // final segment pinned to true endpoint
+  return d;
 }
 
 // ---------------------------------------------------------------------
@@ -204,8 +291,22 @@ const tools = {
         if (newW / newH > ratio) newW = newH * ratio; else newH = newW / ratio;
       }
 
-      const scaleX = (clampedX < fx ? -1 : 1) * newW / gb.width;
-      const scaleY = (clampedY < fy ? -1 : 1) * newH / gb.height;
+      // Which side of the anchor counts as "flipped" depends on which
+      // handle is being dragged, not just which side the pointer is on.
+      // nw/sw anchor sits on the *right* edge (fx = gb.x + gb.width), so
+      // their non-flipped drag direction is pointer-left-of-anchor — the
+      // opposite of ne/se, whose anchor is on the left. Same story for
+      // nw/ne vs sw/se on the y-axis. The old code used one fixed
+      // direction for every handle, which only happens to match "se"
+      // (anchor on the near side for both axes) — hence "only
+      // bottom-right works" and the other three corners flipping/clipping
+      // instead of resizing.
+      const westHandle = dragState.handle.includes("w");
+      const northHandle = dragState.handle.includes("n");
+      const flippedX = westHandle ? clampedX > fx : clampedX < fx;
+      const flippedY = northHandle ? clampedY > fy : clampedY < fy;
+      const scaleX = (flippedX ? -1 : 1) * newW / gb.width;
+      const scaleY = (flippedY ? -1 : 1) * newH / gb.height;
 
       dragDidChange = true;
       for (const { id, bbox } of dragState.starts) {
@@ -277,7 +378,11 @@ const tools = {
     finish() {
       if (this.points.length >= 2) {
         const d = this.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-        const obj = addObject({ id: uid(), type: "path", attrs: { d, fill: "none", ...currentStyle() } });
+        // fill must come after the currentStyle() spread, not before —
+        // currentStyle().fill was silently overwriting "none" here, so
+        // every pen stroke ended up auto-filled with the current fill
+        // colour instead of staying an open path.
+        const obj = addObject({ id: uid(), type: "path", attrs: { ...currentStyle(), d, fill: "none" } });
         selectOnly(obj.id);
         pushUndo();
       }
@@ -294,6 +399,9 @@ const tools = {
   // -------------------------------------------------------------------
   // pencil — free-draw, continuous path following the pointer while
   // dragging. Separate tool from pen (own shortcut, see panels.js).
+  // Smoothing toggle: quadratic-Bézier midpoint smoothing vs raw jagged
+  // line segments (MS Paint style). Both preview and commit share
+  // buildPencilPath() so they can never visually diverge.
   // -------------------------------------------------------------------
   pencil: {
     isDrawing: false,
@@ -316,12 +424,22 @@ const tools = {
       this._preview();
     },
 
-    up() {
+    up(e) {
       if (!this.isDrawing) return;
       this.isDrawing = false;
+      // always capture the true final pointer position, even if it was
+      // within minDist of the last sampled point — fixes strokes falling
+      // short of where the cursor actually stopped
+      if (e) {
+        const p = toDocPoint(e);
+        const last = this.points[this.points.length - 1];
+        if (p.x !== last.x || p.y !== last.y) this.points.push(p);
+      }
       if (this.points.length >= 2) {
-        const d = this.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-        const obj = addObject({ id: uid(), type: "path", attrs: { d, fill: "none", ...currentStyle() } });
+        const d = buildPencilPath(this.points);
+        // same clobbering bug as pen.finish() — fill must be forced after
+        // the spread, otherwise the current fill colour silently wins.
+        const obj = addObject({ id: uid(), type: "path", attrs: { ...currentStyle(), d, fill: "none" } });
         selectOnly(obj.id);
         pushUndo();
       }
@@ -331,7 +449,7 @@ const tools = {
     },
 
     _preview() {
-      const d = this.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+      const d = buildPencilPath(this.points);
       let el = canvasEl.querySelector("#pencil-preview");
       if (!el) {
         el = document.createElementNS(svgNS, "path");
@@ -386,9 +504,6 @@ function scaleObjectWithinGroup(obj, origBBox, originX, originY, scaleX, scaleY)
   const newH = origBBox.height * Math.abs(scaleY);
 
   if (obj.type === "rect" || obj.type === "image") {
-    // when scale is negative, newX/newY is the far corner, not the min corner —
-    // this is the actual sign bug from before: min corner must be re-derived
-    // explicitly per axis, not assumed to already be newX/newY.
     const minX = scaleX < 0 ? newX - newW : newX;
     const minY = scaleY < 0 ? newY - newH : newY;
     obj.attrs.x = clamp(minX, 0, doc.width - newW);
@@ -413,8 +528,6 @@ function scaleObjectWithinGroup(obj, origBBox, originX, originY, scaleX, scaleY)
     obj.attrs.y2 = clamp(originY + (parseFloat(obj.attrs.y2) - originY) * scaleY, 0, doc.height);
 
   } else if (obj.type === "text") {
-    // text/path: position-only shift, unchanged from before — full resize
-    // support for these types is still an open item (see handoff doc)
     obj.attrs.x = clamp(originX + (parseFloat(obj.attrs.x) - originX) * scaleX, 0, doc.width);
     obj.attrs.y = clamp(originY + (parseFloat(obj.attrs.y) - originY) * scaleY, 0, doc.height);
   }
@@ -526,7 +639,7 @@ function floodFillImage(obj, point, fillHex) {
     const localX = point.x - parseFloat(obj.attrs.x);
     const localY = point.y - parseFloat(obj.attrs.y);
     const img = new Image();
-    img.onerror = () => resolve(); // broken/missing source — nothing to fill, don't hang the caller
+    img.onerror = () => resolve();
     img.onload = () => {
       const w = img.naturalWidth, h = img.naturalHeight;
       const c = document.createElement("canvas");

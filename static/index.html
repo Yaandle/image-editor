@@ -92,11 +92,17 @@
 
   function wire(containerId, inputId) {
     const input = document.getElementById(inputId);
-    createColorPicker(document.getElementById(containerId), {
-      initialColor: input.value,
+    const swatchContainer = document.getElementById(containerId);
+
+    createColorPicker(swatchContainer, {
+      initialColor: input.value === 'none' ? '#ffffff' : input.value,
       onChange: hex => { input.value = hex; },
       onCommit: hex => {
         input.value = hex;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      },
+      onNone: () => {
+        input.value = 'none';
         input.dispatchEvent(new Event('change', { bubbles: true }));
       },
     });
@@ -104,6 +110,6 @@
 
   wire('fill-color-picker', 'fill-color');
   wire('stroke-color-picker', 'stroke-color');
-</script>
+  </script>
 </body>
 </html>

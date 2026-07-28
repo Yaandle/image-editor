@@ -212,6 +212,13 @@ function renderSelectionOverlay() {
   }).filter(Boolean);
   if (!boxes.length) return;
 
+  // tools.js — keeps the fill/stroke/stroke-width panel in sync with
+  // whatever's actually selected (bug #2). This is the one function every
+  // selection-changing code path already funnels through (full renderDoc()
+  // as well as the marquee's live renderSelectionOverlay() calls during
+  // drag), so it's a single hook instead of one per call site.
+  syncPropertyPanelToSelection();
+
   if (boxes.length > 1) {
     for (const bb of boxes) {
       const box = document.createElementNS(svgNS, "rect");

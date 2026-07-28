@@ -33,6 +33,14 @@ ensurePanelStyles();
 function renderLayers() {
   const list = document.getElementById("layers-list");
   list.innerHTML = "";
+  // removeLayer() (document.js) correctly refuses to delete the only
+  // remaining layer — an empty-layers doc breaks activeLayer() and every
+  // tool that assumes one exists. But a brand-new document always starts
+  // with exactly one layer, and that refusal was previously silent: click
+  // delete, nothing happens, no explanation. That's the actual bug #1
+  // repro path — disable + relabel the button so the state is visible
+  // instead of indistinguishable from "delete is broken".
+  const onlyLayer = doc.layers.length <= 1;
   [...doc.layers].reverse().forEach((layer) => {
     const li = document.createElement("li");
     li.className = layer.id === doc.activeLayerId ? "active" : "";
@@ -43,7 +51,7 @@ function renderLayers() {
       <button data-act="up" title="Move layer up">▲</button>
       <button data-act="down" title="Move layer down">▼</button>
       <button data-act="vis" title="Toggle visibility">${layer.visible ? "👁" : "🚫"}</button>
-      <button data-act="del" title="Delete layer">✕</button>`;
+      <button data-act="del" title="${onlyLayer ? "Can't delete the only layer" : "Delete layer"}"${onlyLayer ? " disabled" : ""}>✕</button>`;
 
     li.addEventListener("click", e => {
       if (!e.target.dataset.act) { setActiveLayer(layer.id); renderLayers(); }
@@ -60,6 +68,7 @@ function renderLayers() {
     });
     li.querySelector('[data-act="del"]').addEventListener("click", () => {
       if (removeLayer(layer.id)) { pushUndo(); renderDoc(); renderLayers(); }
+      else flashStatus("Can't delete the only layer");
     });
     // displayIndex 0 is topmost/frontmost in the reversed list, so "up" (toward front) is direction +1
     li.querySelector('[data-act="up"]').addEventListener("click", () => {
@@ -261,7 +270,102 @@ function ensurePanelStyles() {
   const style = document.createElement("style");
   style.id = "inkkit-panel-styles";
   style.textContent = `
-
+    #layers-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    #layers-list li {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: var(--nm-surface, #ececea);
+      box-shadow: 2px 2px 4px var(--nm-shadow-dark, #c7c5c2), -2px -2px 4px var(--nm-shadow-light, #fff);
+      cursor: pointer;
+      user-select: none;
+    }
+    #layers-list li.active {
+      outline: 1.5px solid var(--nm-accent, #5b8def);
+      outline-offset: -1.5px;
+    }
+    #layers-list .drag-handle {
+      cursor: grab;
+      color: var(--nm-shadow-dark, #c7c5c2);
+      font-size: 14px;
+      padding: 0 2px;
+    }
+    #layers-list .layer-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: 13px system-ui, sans-serif;
+      color: #3a3936;
+    }
+    #layers-list button {
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      width: 24px;
+      height: 24px;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      color: #6b6965;
+    }
+    #layers-list button:hover {
+      background: var(--nm-accent-soft, rgba(91,141,239,0.25));
+      color: var(--nm-accent, #5b8def);
+    }
+    /* slightly larger visibility icon, per bug #1 */
+    #layers-list button[data-act="vis"] {
+      font-size: 15px;
+    }
+    #layers-list button[data-act="del"]:hover:not(:disabled) {
+      background: rgba(210, 70, 70, 0.18);
+      color: #c23a3a;
+    }
+    #layers-list button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      background: transparent;
+      color: #6b6965;
+    }
+    .layer-rename-input {
+      flex: 1;
+      min-width: 0;
+      font: 13px system-ui, sans-serif;
+      border: 1px solid var(--nm-accent, #5b8def);
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
+    #status-toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: #2c2c2a;
+      color: #f4f3f1;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font: 13px system-ui, sans-serif;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 1000;
+    }
+    #status-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   `;
   document.head.appendChild(style);
 }
+
+

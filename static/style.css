@@ -223,6 +223,36 @@ button.active{ background:var(--accent); }
   box-shadow:none;
 }
 
+.vk-cp-none-swatch{
+  width:100%;
+  aspect-ratio:1;
+  padding:0;
+  border:2px solid var(--ink);
+  box-shadow:none;
+  cursor:pointer;
+  font-size:13px;
+  line-height:1;
+  color:var(--accent2);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%) 0 0/8px 8px,
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%) 4px 4px/8px 8px,
+    #fff;
+}
+.vk-cp-none-swatch:hover{ box-shadow:2px 2px 0 var(--ink); }
+
+.vk-cp-swatch.is-none{
+  color:var(--accent2);
+  background:
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%) 0 0/8px 8px,
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%) 4px 4px/8px 8px,
+    #fff;
+}
+
+
+
 
 .marquee-box { fill: rgba(70,130,240,0.12); stroke: #4682f0; stroke-width: 1; stroke-dasharray: 4,2; }
 .rotation-handle { fill: #fff; stroke: #4682f0; stroke-width: 1.5; cursor: grab; }
