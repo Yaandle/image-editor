@@ -302,6 +302,45 @@ function moveLayerToIndex(fromIndex, toIndex) {
   return true;
 }
 
+// ---- canvas-level operations ----------------------------------------------
+// Distinct from the per-object transforms above (nudgeObject/setRotation/
+// etc.) — these operate on doc.width/doc.height itself and shift every
+// object in every layer together, e.g. a "Canvas Size" dialog.
+
+const ANCHOR_OFFSETS = {
+  nw:     (dw, dh) => [0, 0],
+  n:      (dw, dh) => [dw / 2, 0],
+  ne:     (dw, dh) => [dw, 0],
+  w:      (dw, dh) => [0, dh / 2],
+  center: (dw, dh) => [dw / 2, dh / 2],
+  e:      (dw, dh) => [dw, dh / 2],
+  sw:     (dw, dh) => [0, dh],
+  s:      (dw, dh) => [dw / 2, dh],
+  se:     (dw, dh) => [dw, dh],
+};
+
+// Resizes the canvas without scaling content — objects keep their absolute
+// size and are shifted only enough to stay anchored at the chosen reference
+// point as the canvas grows/shrinks around them (Photoshop's Canvas Size
+// dialog). Content that ends up outside the new bounds isn't deleted — it's
+// still in the doc (recoverable via undo, or by growing the canvas again),
+// the <svg> root just clips it visually since SVG's default overflow is
+// hidden. Distinct from "Scale image", which will resize content itself.
+function resizeCanvas(newWidth, newHeight, anchor = "center") {
+  if (!doc || !(newWidth > 0) || !(newHeight > 0)) return false;
+  const dw = newWidth - doc.width, dh = newHeight - doc.height;
+  const offsetFn = ANCHOR_OFFSETS[anchor] || ANCHOR_OFFSETS.center;
+  const [dx, dy] = offsetFn(dw, dh);
+  if (dx || dy) {
+    for (const layer of doc.layers) {
+      for (const obj of layer.objects) nudgeObject(obj, dx, dy);
+    }
+  }
+  doc.width = newWidth;
+  doc.height = newHeight;
+  return true;
+}
+
 // ---- undo/redo -----------------------------------------------------------
 // snapshot-based — simple and cheap at prototype scale, capped at
 // MAX_HISTORY. Known not to scale to large documents; flagged, not fixed.

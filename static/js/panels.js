@@ -125,6 +125,84 @@ function escapeHtml(s) {
 }
 
 // ---------------------------------------------------------------------
+// properties panel — canvas size (Basic Properties: dimensions + resize)
+// ---------------------------------------------------------------------
+
+// Keeps the width/height inputs reflecting the actual document dimensions.
+// Called from canvas.js's renderDoc() so it can never go stale — same
+// pattern as tools.js's syncPropertyPanelToSelection(). Skips writing to
+// whichever input the user currently has focused so a live edit isn't
+// overwritten mid-keystroke.
+function syncCanvasPropertiesPanel() {
+  if (!doc) return;
+  const widthEl = document.getElementById("canvas-width");
+  const heightEl = document.getElementById("canvas-height");
+  if (widthEl && document.activeElement !== widthEl) widthEl.value = doc.width;
+  if (heightEl && document.activeElement !== heightEl) heightEl.value = doc.height;
+}
+
+let canvasResizeAnchor = "center";
+let canvasAspectLocked = false;
+let canvasAspectRatio = 1;
+
+function initCanvasPropertiesPanel() {
+  const panel = document.getElementById("properties-panel");
+  const toggle = document.getElementById("properties-toggle");
+
+  toggle.onclick = () => {
+
+      panel.classList.toggle("collapsed");
+
+      toggle.textContent =
+          panel.classList.contains("collapsed")
+          ? "▶"
+          : "◀";
+  };
+  const widthEl = document.getElementById("canvas-width");
+  const heightEl = document.getElementById("canvas-height");
+  const lockEl = document.getElementById("canvas-lock-aspect");
+  const anchorGrid = document.getElementById("canvas-anchor-grid");
+  const resizeBtn = document.getElementById("btn-resize-canvas");
+
+  lockEl.addEventListener("change", () => {
+    canvasAspectLocked = lockEl.checked;
+    const w = parseFloat(widthEl.value) || doc.width, h = parseFloat(heightEl.value) || doc.height;
+    if (canvasAspectLocked) canvasAspectRatio = w / h;
+  });
+
+  widthEl.addEventListener("input", () => {
+    if (!canvasAspectLocked) return;
+    const w = parseFloat(widthEl.value);
+    if (w > 0) heightEl.value = Math.round(w / canvasAspectRatio);
+  });
+  heightEl.addEventListener("input", () => {
+    if (!canvasAspectLocked) return;
+    const h = parseFloat(heightEl.value);
+    if (h > 0) widthEl.value = Math.round(h * canvasAspectRatio);
+  });
+
+  anchorGrid.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      canvasResizeAnchor = btn.dataset.anchor;
+      anchorGrid.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
+    });
+  });
+  anchorGrid.querySelector(`[data-anchor="${canvasResizeAnchor}"]`)?.classList.add("active");
+
+  resizeBtn.addEventListener("click", () => {
+    const w = Math.round(parseFloat(widthEl.value));
+    const h = Math.round(parseFloat(heightEl.value));
+    if (!(w > 0) || !(h > 0)) { flashStatus("Enter a valid width and height"); return; }
+    if (w === doc.width && h === doc.height) return;
+    if (resizeCanvas(w, h, canvasResizeAnchor)) {
+      pushUndo(); renderDoc();
+      flashStatus(`Canvas resized to ${w} × ${h}`);
+    }
+  });
+}
+initCanvasPropertiesPanel();
+
+// ---------------------------------------------------------------------
 // image import — file picker + drag-and-drop onto canvas, one shared path
 // ---------------------------------------------------------------------
 
@@ -367,5 +445,3 @@ function ensurePanelStyles() {
   `;
   document.head.appendChild(style);
 }
-
-

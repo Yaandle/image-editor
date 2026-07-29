@@ -74,12 +74,96 @@
       <svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg>
     </main>
 
-    <aside id="layers-panel">
-      <h2>LAYERS</h2>
-      <button id="btn-add-layer">+ LAYER</button>
-      <ul id="layers-list"></ul>
+    <aside id="properties-panel">
+
+      <button id="properties-toggle" title="Hide panel">
+        ◀
+      </button>
+
+      <header class="properties-header">
+        <h2>PROPERTIES</h2>
+        <span class="properties-status">Inspector</span>
+      </header>
+
+
+      <section class="prop-card" id="prop-canvas">
+
+        <div class="prop-card-header">
+          <h3>Canvas</h3>
+        </div>
+
+        <div class="prop-section">
+
+          <div class="prop-row large-gap">
+            <label>
+              Width
+              <input type="number" id="canvas-width" min="1" max="8000">
+            </label>
+
+            <label>
+              Height
+              <input type="number" id="canvas-height" min="1" max="8000">
+            </label>
+          </div>
+
+
+          <label class="prop-checkbox">
+            <input type="checkbox" id="canvas-lock-aspect">
+            <span>Lock aspect ratio</span>
+          </label>
+
+        </div>
+
+
+        <div class="prop-section anchor-section">
+
+          <h4>Anchor Position</h4>
+
+          <div class="anchor-grid" id="canvas-anchor-grid">
+
+            <button data-anchor="nw"></button>
+            <button data-anchor="n"></button>
+            <button data-anchor="ne"></button>
+
+            <button data-anchor="w"></button>
+            <button data-anchor="center"></button>
+            <button data-anchor="e"></button>
+
+            <button data-anchor="sw"></button>
+            <button data-anchor="s"></button>
+            <button data-anchor="se"></button>
+
+          </div>
+
+        </div>
+
+
+        <button class="primary-action" id="btn-resize-canvas">
+          Resize Canvas
+        </button>
+
+      </section>
+
+
+
+      <section class="prop-card">
+
+        <div class="prop-card-header">
+          <h3>Layers</h3>
+        </div>
+
+
+        <button class="secondary-action" id="btn-add-layer">
+          + Add Layer
+        </button>
+
+
+        <ul id="layers-list"></ul>
+
+      </section>
+
+
     </aside>
-  </div>
 
   <script src="js/document.js"></script>
   <script src="js/canvas.js"></script>

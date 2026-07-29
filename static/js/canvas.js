@@ -128,6 +128,11 @@ function renderDoc() {
 
   applyPendingRotations();
   renderSelectionOverlay();
+
+  // panels.js — keeps the Properties panel's width/height inputs reflecting
+  // doc.width/doc.height after resize, undo/redo, load, or new-document.
+  // Same single-hook approach as syncPropertyPanelToSelection() below.
+  syncCanvasPropertiesPanel();
 }
 
 // Splits out of renderDoc() so tools.js can call it standalone after a
