@@ -24,9 +24,17 @@ function uid() {
 function newDocument(width = 900, height = 600) {
   const layer = { id: uid(), name: "Layer 1", visible: true, objects: [] };
   doc = { width, height, layers: [layer], activeLayerId: layer.id, selectedIds: [] };
+  resetHistory();
+  return doc;
+}
+
+// Clears undo/redo and re-baselines lastCommitted to the current doc.
+// Must be called whenever doc is replaced wholesale (new document, project
+// load) — export.js uses this instead of touching the stacks directly.
+function resetHistory() {
   undoStack = [];
   redoStack = [];
-  return doc;
+  lastCommitted = doc ? JSON.stringify(doc) : null;
 }
 
 // ---- selection helpers -----------------------------------------------
@@ -344,11 +352,21 @@ function resizeCanvas(newWidth, newHeight, anchor = "center") {
 // ---- undo/redo -----------------------------------------------------------
 // snapshot-based — simple and cheap at prototype scale, capped at
 // MAX_HISTORY. Known not to scale to large documents; flagged, not fixed.
+//
+// Call sites invoke pushUndo() AFTER mutating doc, so what gets pushed onto
+// the undo stack is lastCommitted — the state as of the *previous* commit —
+// not the current serialization. (Pushing the post-edit state made the first
+// undo a silent no-op: the popped snapshot equalled the live doc.)
+
+let lastCommitted = null;
 
 function pushUndo() {
   if (!doc) return;
-  undoStack.push(JSON.stringify(doc));
-  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  if (lastCommitted != null) {
+    undoStack.push(lastCommitted);
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  }
+  lastCommitted = JSON.stringify(doc);
   redoStack = [];
 }
 
@@ -356,6 +374,7 @@ function undo() {
   if (!undoStack.length) return;
   redoStack.push(JSON.stringify(doc));
   doc = JSON.parse(undoStack.pop());
+  lastCommitted = JSON.stringify(doc);
   renderDoc(); renderLayers();
 }
 
@@ -363,6 +382,7 @@ function redo() {
   if (!redoStack.length) return;
   undoStack.push(JSON.stringify(doc));
   doc = JSON.parse(redoStack.pop());
+  lastCommitted = JSON.stringify(doc);
   renderDoc(); renderLayers();
 }
 

@@ -86,8 +86,6 @@ function syncPropertyPanelToSelection() {
   }
 }
 
-ensureToolStyles();
-
 canvasEl.addEventListener("pointerdown", e => tools[currentTool]?.down(e));
 canvasEl.addEventListener("pointermove", e => {
   updateHoverCursor(e);
@@ -110,30 +108,8 @@ window.addEventListener("keydown", e => {
 });
 
 // Cursor feedback: crosshair for draw tools, resize/rotate cursor when
-// hovering a handle, grab cursor over a selected object body — MS Paint
-// gives constant visual feedback about what a click will do.
-function ensureToolStyles() {
-  if (document.getElementById("inkkit-tool-styles")) return;
-  const style = document.createElement("style");
-  style.id = "inkkit-tool-styles";
-  style.textContent = `
-    #canvas.tool-select { cursor: default; }
-    #canvas.tool-rect, #canvas.tool-ellipse, #canvas.tool-line,
-    #canvas.tool-pen, #canvas.tool-pencil { cursor: crosshair; }
-    #canvas.tool-text { cursor: text; }
-    #canvas.tool-fill { cursor: cell; }
-    #canvas [data-id]:not(.broken-image-placeholder) { cursor: move; }
-    .marquee-box {
-      fill: var(--nm-accent-soft, rgba(91,141,239,0.15));
-      stroke: var(--nm-accent, #5b8def);
-      stroke-width: 1;
-      stroke-dasharray: 4 3;
-      vector-effect: non-scaling-stroke;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
+// hovering a handle, grab cursor over a selected object body. The static
+// per-tool cursor rules live in style.css (#canvas.tool-*).
 function updateHoverCursor(e) {
   if (currentTool !== "select") return;
   const cursor = e.target?.dataset?.cursor;

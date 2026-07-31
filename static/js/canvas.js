@@ -11,107 +11,10 @@ const svgNS = "http://www.w3.org/2000/svg";
 const canvasEl = document.getElementById("canvas");
 const TAGS = { rect: "rect", ellipse: "ellipse", line: "line", path: "path", text: "text", image: "image" };
 
-// Neo-morphism surface tokens — injected once. Soft, low-contrast, dual
-// shadow (light + dark) rather than the old neo-brutalist hard border.
-// Kept here since canvas.js owns the canvas chrome; panels.js/tools.js
-// reference these same custom properties for handles/toolbar consistency.
-function ensureCanvasStyles() {
-  if (document.getElementById("inkkit-canvas-styles")) return;
-  const style = document.createElement("style");
-  style.id = "inkkit-canvas-styles";
-  style.textContent = `
-    :root {
-      --nm-bg: #e8e6e3;
-      --nm-surface: #ececea;
-      --nm-shadow-dark: #c7c5c2;
-      --nm-shadow-light: #ffffff;
-      --nm-accent: #5b8def;
-      --nm-accent-soft: rgba(91, 141, 239, 0.25);
-      --nm-handle-fill: #f4f3f1;
-      --nm-handle-stroke: #b9b7b3;
-      --nm-radius: 10px;
-    }
-    #canvas-frame {
-      background: var(--nm-bg);
-      border-radius: var(--nm-radius);
-      box-shadow: 8px 8px 16px var(--nm-shadow-dark), -8px -8px 16px var(--nm-shadow-light);
-      padding: 16px;
-      display: inline-block;
-    }
-    #canvas {
-      background-color: #ffffff;
-      background-image:
-        linear-gradient(45deg, #f0f0ef 25%, transparent 25%),
-        linear-gradient(-45deg, #f0f0ef 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #f0f0ef 75%),
-        linear-gradient(-45deg, transparent 75%, #f0f0ef 75%);
-      background-size: 16px 16px;
-      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-      border-radius: 4px;
-      display: block;
-    }
-    .selection-box {
-      fill: none;
-      stroke: var(--nm-accent);
-      stroke-width: 1.5;
-      stroke-dasharray: 4 3;
-      pointer-events: none;
-      vector-effect: non-scaling-stroke;
-    }
-    .selection-box-member {
-      fill: none;
-      stroke: var(--nm-accent);
-      stroke-width: 1;
-      stroke-dasharray: 2 2;
-      opacity: 0.6;
-      pointer-events: none;
-      vector-effect: non-scaling-stroke;
-    }
-    .selection-handle {
-      fill: var(--nm-handle-fill);
-      stroke: var(--nm-handle-stroke);
-      stroke-width: 1;
-      filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.15));
-      cursor: pointer;
-    }
-    .selection-handle:hover {
-      fill: var(--nm-accent-soft);
-      stroke: var(--nm-accent);
-    }
-    .rotation-stem {
-      stroke: var(--nm-handle-stroke);
-      stroke-width: 1;
-      stroke-dasharray: 2 2;
-      pointer-events: none;
-      vector-effect: non-scaling-stroke;
-    }
-    .rotation-handle {
-      fill: var(--nm-handle-fill);
-      stroke: var(--nm-accent);
-      stroke-width: 1;
-      filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.15));
-      cursor: grab;
-    }
-    .rotation-handle:hover { fill: var(--nm-accent-soft); }
-    .rotation-handle:active { cursor: grabbing; }
-    .broken-image-placeholder rect {
-      fill: #f4f3f1;
-      stroke: #c7c5c2;
-      stroke-width: 1;
-      stroke-dasharray: 4 2;
-    }
-    .broken-image-placeholder text {
-      fill: #9a9894;
-      font-size: 11px;
-      font-family: system-ui, sans-serif;
-    }
-  `;
-  document.head.appendChild(style);
-}
+// All chrome/overlay styling lives in style.css and reads the shared
+// design tokens — this file only assigns class names.
 
 function renderDoc() {
-  ensureCanvasStyles();
-
   canvasEl.setAttribute("width", doc.width);
   canvasEl.setAttribute("height", doc.height);
   canvasEl.setAttribute("viewBox", `0 0 ${doc.width} ${doc.height}`);
@@ -265,6 +168,8 @@ function groupBBox(boxes) {
 // re-deriving handle geometry itself.
 const HANDLE_CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
 
+const HANDLE_SIZE = 8; // square white handles with blue borders — design system
+
 function appendResizeHandles(overlay, gb) {
   const corners = {
     nw: [gb.x, gb.y],
@@ -274,8 +179,9 @@ function appendResizeHandles(overlay, gb) {
   };
   for (const name of Object.keys(corners)) {
     const [cx, cy] = corners[name];
-    const h = document.createElementNS(svgNS, "circle");
-    h.setAttribute("cx", cx); h.setAttribute("cy", cy); h.setAttribute("r", 5);
+    const h = document.createElementNS(svgNS, "rect");
+    h.setAttribute("x", cx - HANDLE_SIZE / 2); h.setAttribute("y", cy - HANDLE_SIZE / 2);
+    h.setAttribute("width", HANDLE_SIZE); h.setAttribute("height", HANDLE_SIZE);
     h.setAttribute("class", "selection-handle");
     h.dataset.handle = name;
     h.dataset.cursor = HANDLE_CURSORS[name];

@@ -14,7 +14,17 @@ document.getElementById("btn-add-layer").addEventListener("click", () => {
   pushUndo(); renderLayers(); renderDoc();
 });
 
-ensurePanelStyles();
+// ---------------------------------------------------------------------
+// theme toggle — sets data-theme on <html>, persisted to localStorage.
+// Components read CSS vars at paint time, so a redraw is all that's needed.
+// ---------------------------------------------------------------------
+
+document.getElementById("btn-theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
+  localStorage.setItem("imagekit_theme", root.dataset.theme);
+  renderDoc();
+});
 
 // ---------------------------------------------------------------------
 // bug #3 fix (kept): layer delete/visibility toggle was breaking because
@@ -149,14 +159,11 @@ function initCanvasPropertiesPanel() {
   const panel = document.getElementById("properties-panel");
   const toggle = document.getElementById("properties-toggle");
 
+  // panel sits on the right edge: expanded → "▶" (collapse rightward),
+  // collapsed → "◀" (expand back out)
   toggle.onclick = () => {
-
-      panel.classList.toggle("collapsed");
-
-      toggle.textContent =
-          panel.classList.contains("collapsed")
-          ? "▶"
-          : "◀";
+    panel.classList.toggle("collapsed");
+    toggle.textContent = panel.classList.contains("collapsed") ? "◀" : "▶";
   };
   const widthEl = document.getElementById("canvas-width");
   const heightEl = document.getElementById("canvas-height");
@@ -263,11 +270,42 @@ function flashStatus(msg) {
 // keyboard shortcuts
 // ---------------------------------------------------------------------
 
+// Internal clipboard — deep clones of the copied objects. Deliberately not
+// the system clipboard: SVG-attr JSON isn't a portable format, and an
+// in-app buffer avoids async permission prompts.
+let objectClipboard = [];
+
 window.addEventListener("keydown", e => {
   const tag = document.activeElement.tagName;
   if (tag === "INPUT" || tag === "SELECT") return;
 
   if (e.ctrlKey && e.key.toLowerCase() === "z") { e.shiftKey ? redo() : undo(); e.preventDefault(); return; }
+  if (e.ctrlKey && e.key.toLowerCase() === "y") { redo(); e.preventDefault(); return; }
+
+  if (e.ctrlKey && e.key.toLowerCase() === "s") { saveProject(); e.preventDefault(); return; }
+
+  if (e.ctrlKey && e.key.toLowerCase() === "c") { // copy selection
+    if (doc.selectedIds.length) {
+      objectClipboard = selectedObjects().map(o => JSON.parse(JSON.stringify(o)));
+      flashStatus(`Copied ${objectClipboard.length} object${objectClipboard.length > 1 ? "s" : ""}`);
+    }
+    e.preventDefault(); return;
+  }
+
+  if (e.ctrlKey && e.key.toLowerCase() === "v") { // paste into active layer, offset
+    if (objectClipboard.length) {
+      const newIds = [];
+      for (const src of objectClipboard) {
+        const clone = { id: uid(), type: src.type, attrs: JSON.parse(JSON.stringify(src.attrs)) };
+        nudgeObject(clone, 10, 10);
+        addObject(clone);
+        newIds.push(clone.id);
+      }
+      doc.selectedIds = newIds;
+      pushUndo(); renderDoc();
+    }
+    e.preventDefault(); return;
+  }
 
   if (e.ctrlKey && e.key.toLowerCase() === "d") { // duplicate selection
     if (doc.selectedIds.length) {
@@ -338,110 +376,4 @@ window.addEventListener("keydown", e => {
   if (map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
 });
 
-// ---------------------------------------------------------------------
-// neo-morphism styling for panel chrome — consistent with canvas.js's
-// --nm-* custom properties, injected once from whichever file loads first
-// ---------------------------------------------------------------------
-
-function ensurePanelStyles() {
-  if (document.getElementById("inkkit-panel-styles")) return;
-  const style = document.createElement("style");
-  style.id = "inkkit-panel-styles";
-  style.textContent = `
-    #layers-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    #layers-list li {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 8px;
-      border-radius: 8px;
-      background: var(--nm-surface, #ececea);
-      box-shadow: 2px 2px 4px var(--nm-shadow-dark, #c7c5c2), -2px -2px 4px var(--nm-shadow-light, #fff);
-      cursor: pointer;
-      user-select: none;
-    }
-    #layers-list li.active {
-      outline: 1.5px solid var(--nm-accent, #5b8def);
-      outline-offset: -1.5px;
-    }
-    #layers-list .drag-handle {
-      cursor: grab;
-      color: var(--nm-shadow-dark, #c7c5c2);
-      font-size: 14px;
-      padding: 0 2px;
-    }
-    #layers-list .layer-name {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font: 13px system-ui, sans-serif;
-      color: #3a3936;
-    }
-    #layers-list button {
-      border: none;
-      background: transparent;
-      border-radius: 6px;
-      width: 24px;
-      height: 24px;
-      font-size: 13px;
-      line-height: 1;
-      cursor: pointer;
-      color: #6b6965;
-    }
-    #layers-list button:hover {
-      background: var(--nm-accent-soft, rgba(91,141,239,0.25));
-      color: var(--nm-accent, #5b8def);
-    }
-    /* slightly larger visibility icon, per bug #1 */
-    #layers-list button[data-act="vis"] {
-      font-size: 15px;
-    }
-    #layers-list button[data-act="del"]:hover:not(:disabled) {
-      background: rgba(210, 70, 70, 0.18);
-      color: #c23a3a;
-    }
-    #layers-list button:disabled {
-      opacity: 0.35;
-      cursor: not-allowed;
-      background: transparent;
-      color: #6b6965;
-    }
-    .layer-rename-input {
-      flex: 1;
-      min-width: 0;
-      font: 13px system-ui, sans-serif;
-      border: 1px solid var(--nm-accent, #5b8def);
-      border-radius: 4px;
-      padding: 2px 4px;
-    }
-    #status-toast {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%) translateY(8px);
-      background: #2c2c2a;
-      color: #f4f3f1;
-      padding: 8px 14px;
-      border-radius: 8px;
-      font: 13px system-ui, sans-serif;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.15s ease, transform 0.15s ease;
-      z-index: 1000;
-    }
-    #status-toast.visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-  `;
-  document.head.appendChild(style);
-}
+// Panel chrome styling lives in style.css — this file only builds DOM.

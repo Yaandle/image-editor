@@ -101,10 +101,19 @@ image-editor/
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+Z` | Undo |
-| `Ctrl+Y` | Redo |
-| `Ctrl+C` | Copy |
-| `Ctrl+V` | Paste |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
+| `Ctrl+C` / `Ctrl+V` | Copy / Paste selection |
+| `Ctrl+D` | Duplicate selection |
+| `Ctrl+A` | Select all |
 | `Delete` | Delete selected object |
 | `Ctrl+S` | Save project |
+| `Arrows` / `Shift+Arrows` | Nudge 1px / 10px |
+| `Ctrl+[` / `Ctrl+]` | Send backward / bring forward (`+Shift` = to back/front) |
+| `V R E L P B T F` | Tool shortcuts |
+
+## Theming
+
+Dark (default) and light themes, toggled from the topbar (◐) and persisted
+to `localStorage`. All components read shared CSS variables — the token
+sheet in `static/style.css` matches vidkit's design system.
 ```

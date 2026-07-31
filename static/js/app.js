@@ -18,9 +18,9 @@ try {
 
   document.body.dataset.appReady = "true";
 } catch (err) {
-  console.error("inkkit failed to start:", err);
+  console.error("imagekit failed to start:", err);
   document.body.innerHTML =
-    `<div style="padding:2rem;font:14px system-ui,sans-serif;color:#9a9894">
-       inkkit couldn't start — check the console for details.
+    `<div style="padding:2rem;font:14px 'Courier New',monospace;font-weight:700">
+       imagekit couldn't start — check the console for details.
      </div>`;
 }

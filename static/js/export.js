@@ -1,8 +1,6 @@
 // export.js
 // SVG/PNG/JPEG export, plus save/load against the FastAPI backend.
 
-ensureExportStyles();
-
 function download(blob, filename) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
@@ -80,8 +78,10 @@ async function refreshProjectList() {
     if (!res.ok) throw new Error("Couldn't load project list");
     const names = await res.json();
     document.getElementById("project-list").innerHTML =
-      `<option value="">Load…</option>` + names.map(n => `<option>${escapeAttr(n)}</option>`).join("");
+      `<option value="">LOAD…</option>` + names.map(n => `<option>${escapeAttr(n)}</option>`).join("");
+    setConnected(true);
   } catch (err) {
+    setConnected(false);
     flashStatus(err.message || "Couldn't refresh project list");
   }
 }
@@ -108,8 +108,10 @@ document.getElementById("project-list").addEventListener("change", async e => {
     e.target.value = "";
     return;
   }
+  // Note: don't use setBusy() here — writing textContent on a <select>
+  // destroys its <option> children. Disable only.
   const select = e.target;
-  setBusy(select, true, "Loading…");
+  select.disabled = true;
   try {
     const res = await fetch(`/api/projects/${encodeURIComponent(name)}`);
     if (!res.ok) throw new Error(`Couldn't load "${name}" (${res.status})`);
@@ -117,35 +119,29 @@ document.getElementById("project-list").addEventListener("change", async e => {
     if (!loaded || !Array.isArray(loaded.layers)) throw new Error(`"${name}" isn't a valid project file`);
     doc = loaded;
     document.getElementById("project-name").value = name;
-    undoStack = []; redoStack = [];
+    resetHistory();
     renderDoc(); renderLayers();
   } catch (err) {
     flashStatus(err.message || "Load failed");
     select.value = "";
   } finally {
-    setBusy(select, false, "Load…");
+    select.disabled = false;
   }
 });
 
 document.getElementById("btn-new").addEventListener("click", () => {
   if (!isDocEmpty() && !confirm("Start a new document? Unsaved changes will be lost.")) return;
-  doc = newDocument(); undoStack = []; redoStack = [];
-  document.getElementById("project-name").value = "";
+  doc = newDocument(); // newDocument() resets history itself
+  document.getElementById("project-name").value = "untitled";
   renderDoc(); renderLayers();
 });
 
 // ---------------------------------------------------------------------
-// neo-morphism styling for save/export/new controls — same token set as
-// canvas.js/panels.js. Scoped under .io-btn so it can't collide if
-// index.html's actual button classes differ from panels.js's .tool.
+// status bar — red dot until the backend answers, green once connected
 // ---------------------------------------------------------------------
 
-function ensureExportStyles() {
-  if (document.getElementById("inkkit-export-styles")) return;
-  const style = document.createElement("style");
-  style.id = "inkkit-export-styles";
-  style.textContent = `
-
-  `;
-  document.head.appendChild(style);
+function setConnected(ok) {
+  document.getElementById("status-dot")?.classList.toggle("connected", ok);
+  const text = document.getElementById("status-text");
+  if (text) text.textContent = ok ? "CONNECTED" : "OFFLINE";
 }

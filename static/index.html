@@ -2,22 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ImageKit</title>
+<title>imagekit</title>
 <link rel="stylesheet" href="style.css">
+<script>
+  // theme bootstrap — before first paint so there's no flash of wrong theme
+  document.documentElement.dataset.theme = localStorage.getItem("imagekit_theme") || "dark";
+</script>
 </head>
 <body>
   <header id="topbar">
-    <h1>ImageKit</h1>
+    <h1>imagekit</h1>
+    <div class="toolbar-sep"></div>
     <div id="project-controls">
-      <input id="project-name" value="untitled">
+      <input id="project-name" value="untitled" title="Project name">
       <button id="btn-save">SAVE</button>
-      <select id="project-list"><option value="">Load…</option></select>
+      <select id="project-list"><option value="">LOAD…</option></select>
       <button id="btn-new">NEW</button>
     </div>
     <div id="export-controls">
       <button data-export="svg">SVG</button>
       <button data-export="png">PNG</button>
       <button data-export="jpeg">JPEG</button>
+      <div class="toolbar-sep"></div>
+      <button id="btn-theme" title="Toggle theme">◐</button>
     </div>
   </header>
 
@@ -76,13 +83,10 @@
 
     <aside id="properties-panel">
 
-      <button id="properties-toggle" title="Hide panel">
-        ◀
-      </button>
-
       <header class="properties-header">
-        <h2>PROPERTIES</h2>
+        <h2>Properties</h2>
         <span class="properties-status">Inspector</span>
+        <button id="properties-toggle" title="Toggle panel">▶</button>
       </header>
 
 
@@ -164,6 +168,14 @@
 
 
     </aside>
+
+  </div>
+
+  <footer id="statusbar">
+    <span id="status-dot" title="Backend connection"></span>
+    <span id="status-text">OFFLINE</span>
+    <span id="status-hint">V SELECT · R RECT · E ELLIPSE · L LINE · P PEN · B PENCIL · T TEXT · F FILL</span>
+  </footer>
 
   <script src="js/document.js"></script>
   <script src="js/canvas.js"></script>
