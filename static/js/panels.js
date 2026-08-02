@@ -27,6 +27,28 @@ document.getElementById("pencil-smoothing")?.addEventListener("change", e => {
 });
 
 // ---------------------------------------------------------------------
+// Arrange panel — align / distribute / flip (tools.js)
+// ---------------------------------------------------------------------
+
+document.querySelectorAll("[data-align]").forEach(btn => {
+  btn.addEventListener("click", () => alignSelection(btn.dataset.align));
+});
+document.querySelectorAll("[data-distribute]").forEach(btn => {
+  btn.addEventListener("click", () => distributeSelection(btn.dataset.distribute));
+});
+document.querySelectorAll("[data-flip]").forEach(btn => {
+  btn.addEventListener("click", () => flipSelection(btn.dataset.flip));
+});
+
+// ---------------------------------------------------------------------
+// Crop panel (tools.js)
+// ---------------------------------------------------------------------
+
+document.getElementById("btn-start-crop").addEventListener("click", startCrop);
+document.getElementById("btn-apply-crop").addEventListener("click", applyCrop);
+document.getElementById("btn-cancel-crop").addEventListener("click", cancelCrop);
+
+// ---------------------------------------------------------------------
 // theme toggle — sets data-theme on <html>, persisted to localStorage.
 // Components read CSS vars at paint time, so a redraw is all that's needed.
 // ---------------------------------------------------------------------

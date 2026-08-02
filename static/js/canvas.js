@@ -48,8 +48,9 @@ function renderDoc() {
     canvasEl.appendChild(g);
   }
 
-  applyPendingRotations();
+  applyPendingTransforms();
   renderSelectionOverlay();
+  renderCropOverlay();
 
   // panels.js — keeps the Properties panel's width/height inputs reflecting
   // doc.width/doc.height after resize, undo/redo, load, or new-document.
@@ -60,18 +61,60 @@ function renderDoc() {
   // the Undo/Redo buttons stayed permanently clickable even with an empty
   // stack. Same single-render-hook pattern as the two syncs above.
   updateUndoRedoButtons();
+
+  // tools.js — shows/hides the Arrange/Adjustments/Crop cards. Deliberately
+  // called here (every render) rather than only from renderSelectionOverlay,
+  // since that function early-returns when the selection is empty and these
+  // cards need to hide again in exactly that case.
+  syncSelectionDependentPanels();
 }
 
 // Splits out of renderDoc() so tools.js can call it standalone after a
 // live drag ends without re-running the full document rebuild.
-function applyPendingRotations() {
-  canvasEl.querySelectorAll("[data-pending-rotation]").forEach(el => {
-    const deg = el.dataset.pendingRotation;
+//
+// Rotation and flip (flipH/flipV) are the only two things this app renders
+// as SVG transforms rather than raw attributes (see the file header) — both
+// applied here, together, anchored at the same pre-transform bbox center so
+// flipping and rotating an object compose around one shared pivot instead of
+// each fighting over their own. Order is flip-then-rotate (translate to
+// origin, scale for the flip, rotate, translate back) — reads right-to-left.
+function applyPendingTransforms() {
+  canvasEl.querySelectorAll("[data-pending-transform]").forEach(el => {
     const bb = el.getBBox();
     const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
-    el.setAttribute("transform", `rotate(${deg} ${cx} ${cy})`);
-    delete el.dataset.pendingRotation;
+    const deg = el.dataset.pendingRot || 0;
+    const sx = el.dataset.pendingFlipH ? -1 : 1;
+    const sy = el.dataset.pendingFlipV ? -1 : 1;
+    el.setAttribute("transform", `translate(${cx} ${cy}) rotate(${deg}) scale(${sx} ${sy}) translate(${-cx} ${-cy})`);
+    delete el.dataset.pendingTransform;
+    delete el.dataset.pendingRot;
+    delete el.dataset.pendingFlipH;
+    delete el.dataset.pendingFlipV;
   });
+}
+
+// Attrs that are stored as raw data on the object but never copied straight
+// onto the SVG element as-is — either because they're computed into a
+// different attribute (ADJUSTMENT_KEYS -> "filter", flipH/flipV -> the
+// transform pass) or because they're handled specially elsewhere (content,
+// rotation).
+const ADJUSTMENT_KEYS = ["brightness", "contrast", "saturate", "grayscale", "invert"];
+const ADJUSTMENT_DEFAULTS = { brightness: 100, contrast: 100, saturate: 100, grayscale: 0, invert: 0 };
+const NON_ATTR_KEYS = ["content", "rotation", "flipH", "flipV", ...ADJUSTMENT_KEYS];
+
+// Builds the CSS filter() string for an image's adjustment sliders. Using
+// CSS filter functions (not a hand-built <filter> def with feColorMatrix
+// chains) because SVG's `filter` presentation attribute accepts them
+// directly in every modern browser — and because it's a live filter, not a
+// rasterization, an animated GIF underneath keeps animating with the
+// adjustment applied. Returns null when every value is still at its default,
+// so unadjusted images don't carry a no-op filter attribute.
+function buildAdjustmentFilter(attrs) {
+  const v = { ...ADJUSTMENT_DEFAULTS };
+  for (const k of ADJUSTMENT_KEYS) if (attrs[k] != null) v[k] = num(attrs[k]);
+  const isDefault = ADJUSTMENT_KEYS.every(k => v[k] === ADJUSTMENT_DEFAULTS[k]);
+  if (isDefault) return null;
+  return `brightness(${v.brightness}%) contrast(${v.contrast}%) saturate(${v.saturate}%) grayscale(${v.grayscale}%) invert(${v.invert}%)`;
 }
 
 function buildElement(obj) {
@@ -81,17 +124,25 @@ function buildElement(obj) {
 
   const el = document.createElementNS(svgNS, TAGS[obj.type]);
   for (const [k, v] of Object.entries(obj.attrs)) {
-    if (k === "content" || k === "rotation") continue;
+    if (NON_ATTR_KEYS.includes(k)) continue;
     el.setAttribute(k, v);
   }
   if (obj.type === "text") el.textContent = obj.attrs.content ?? "";
+  if (obj.type === "image") {
+    const filter = buildAdjustmentFilter(obj.attrs);
+    if (filter) el.setAttribute("filter", filter);
+  }
   el.dataset.id = obj.id;
   el.dataset.type = obj.type;
 
   const deg = getRotation(obj);
-  if (deg) {
-    // applied after DOM attach so getBBox() reads pre-rotation — see applyPendingRotations()
-    el.dataset.pendingRotation = deg;
+  const flip = getFlip(obj);
+  if (deg || flip.h || flip.v) {
+    // applied after DOM attach so getBBox() reads pre-transform — see applyPendingTransforms()
+    el.dataset.pendingTransform = "1";
+    if (deg) el.dataset.pendingRot = deg;
+    if (flip.h) el.dataset.pendingFlipH = "1";
+    if (flip.v) el.dataset.pendingFlipV = "1";
   }
   return el;
 }
@@ -121,7 +172,7 @@ function buildBrokenImagePlaceholder(obj) {
   g.appendChild(label);
 
   const deg = getRotation(obj);
-  if (deg) g.dataset.pendingRotation = deg;
+  if (deg) { g.dataset.pendingTransform = "1"; g.dataset.pendingRot = deg; }
   return g;
 }
 
@@ -224,6 +275,60 @@ function appendRotationHandle(overlay, gb) {
   rh.setAttribute("class", "rotation-handle");
   rh.dataset.handle = "rotate";
   overlay.appendChild(rh);
+}
+
+// ---- crop overlay ---------------------------------------------------------
+// cropState (tools.js) is a transient editing mode, not part of doc — it
+// never gets pushed to undo history; only applyCrop()'s resulting attribute
+// change does. Rendered as its own overlay group, same pattern as
+// renderSelectionOverlay(), rebuilt every renderDoc() call.
+
+function renderCropOverlay() {
+  document.getElementById("crop-overlay")?.remove();
+  if (!cropState) return;
+
+  const { bounds, rect } = cropState;
+  const g = document.createElementNS(svgNS, "g");
+  g.id = "crop-overlay";
+
+  // Dim the parts of the image's original bounds that fall outside the crop
+  // rect — four bars around it rather than a punch-hole clipPath, simpler
+  // for this scope and there's no nested clipping elsewhere to reuse.
+  const dim = (x, y, w, h) => {
+    if (w <= 0.01 || h <= 0.01) return;
+    const r = document.createElementNS(svgNS, "rect");
+    r.setAttribute("x", x); r.setAttribute("y", y);
+    r.setAttribute("width", w); r.setAttribute("height", h);
+    r.setAttribute("class", "crop-dim");
+    g.appendChild(r);
+  };
+  dim(bounds.x, bounds.y, bounds.width, rect.y - bounds.y);
+  dim(bounds.x, rect.y + rect.height, bounds.width, (bounds.y + bounds.height) - (rect.y + rect.height));
+  dim(bounds.x, rect.y, rect.x - bounds.x, rect.height);
+  dim(rect.x + rect.width, rect.y, (bounds.x + bounds.width) - (rect.x + rect.width), rect.height);
+
+  const border = document.createElementNS(svgNS, "rect");
+  border.setAttribute("x", rect.x); border.setAttribute("y", rect.y);
+  border.setAttribute("width", rect.width); border.setAttribute("height", rect.height);
+  border.setAttribute("class", "crop-border");
+  g.appendChild(border);
+
+  const corners = {
+    nw: [rect.x, rect.y], ne: [rect.x + rect.width, rect.y],
+    sw: [rect.x, rect.y + rect.height], se: [rect.x + rect.width, rect.y + rect.height],
+  };
+  for (const name of Object.keys(corners)) {
+    const [cx, cy] = corners[name];
+    const h = document.createElementNS(svgNS, "rect");
+    h.setAttribute("x", cx - HANDLE_SIZE / 2); h.setAttribute("y", cy - HANDLE_SIZE / 2);
+    h.setAttribute("width", HANDLE_SIZE); h.setAttribute("height", HANDLE_SIZE);
+    h.setAttribute("class", "crop-handle");
+    h.dataset.cropHandle = name;
+    h.dataset.cursor = HANDLE_CURSORS[name];
+    g.appendChild(h);
+  }
+
+  canvasEl.appendChild(g);
 }
 
 // ---- geometry helpers for tools.js ---------------------------------------

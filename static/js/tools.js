@@ -10,9 +10,18 @@ let currentTool = "select";
 let dragState = null;
 let dragDidChange = false; // tracks whether a drag actually mutated anything, to avoid no-op undo pushes
 
+// Crop mode — a transient editing state layered on top of the select tool
+// rather than its own tool, so it never has to duplicate select's pointer
+// plumbing. { id, bounds: the image's original x/y/width/height (crop rect
+// can't exceed these), rect: the crop rect being dragged }. Not part of doc —
+// only applyCrop()'s resulting attribute change is undoable, cropping itself
+// can be freely cancelled.
+let cropState = null;
+
 function setTool(name) {
   currentTool = name;
   tools.pen.cancel?.();
+  if (cropState) { cropState = null; renderDoc(); } // switching tools abandons an in-progress crop
   clearSelection();
   document.querySelectorAll(".tool").forEach(b => b.classList.toggle("active", b.dataset.tool === name));
   // Tool state is shared across every page (spec: "shares the same tool
@@ -89,6 +98,83 @@ function syncPropertyPanelToSelection() {
   }
 }
 
+// Shows/hides the Arrange card (any selection) and Adjustments+Crop cards
+// (image selections only), and keeps the adjustment sliders reflecting the
+// first selected object's actual values — same "first member, skip whatever
+// input currently has focus" convention as syncPropertyPanelToSelection()
+// above. Called unconditionally from canvas.js's renderDoc() (not just when
+// a selection exists) so these cards actually hide again once you deselect —
+// renderSelectionOverlay() only runs its sync hook when there IS a selection.
+function syncSelectionDependentPanels() {
+  const ids = doc?.selectedIds || [];
+  const arrangeCard = document.getElementById("prop-arrange");
+  if (arrangeCard) arrangeCard.hidden = ids.length === 0;
+
+  const adjustCard = document.getElementById("prop-adjustments");
+  const firstObj = ids.length ? selectedObjects()[0] : null;
+  const isImage = firstObj?.type === "image";
+  if (adjustCard) adjustCard.hidden = !isImage;
+  if (!isImage) return;
+
+  const fields = {
+    "adj-brightness": firstObj.attrs.brightness ?? 100,
+    "adj-contrast": firstObj.attrs.contrast ?? 100,
+    "adj-saturate": firstObj.attrs.saturate ?? 100,
+    "adj-grayscale": firstObj.attrs.grayscale ?? 0,
+  };
+  for (const [id, val] of Object.entries(fields)) {
+    const el = document.getElementById(id);
+    if (el && document.activeElement !== el) el.value = val;
+  }
+  const invertEl = document.getElementById("adj-invert");
+  if (invertEl) invertEl.checked = (firstObj.attrs.invert ?? 0) >= 50;
+
+  const cropControls = document.getElementById("crop-controls");
+  if (cropControls) cropControls.hidden = !!firstObj.animated;
+  const startBtn = document.getElementById("btn-start-crop");
+  const activeControls = document.getElementById("crop-active-controls");
+  if (startBtn) startBtn.hidden = !!cropState;
+  if (activeControls) activeControls.hidden = !cropState;
+}
+
+function currentAdjustmentValues() {
+  return {
+    brightness: document.getElementById("adj-brightness").value,
+    contrast: document.getElementById("adj-contrast").value,
+    saturate: document.getElementById("adj-saturate").value,
+    grayscale: document.getElementById("adj-grayscale").value,
+    invert: document.getElementById("adj-invert").checked ? 100 : 0,
+  };
+}
+
+// Same live(input)/commit(change) split as applyPropertyChange() — only
+// applies to image objects within the selection, silently skipping others.
+function applyAdjustment(commit) {
+  if (!doc || !doc.selectedIds.length) return;
+  const v = currentAdjustmentValues();
+  for (const id of doc.selectedIds) {
+    const { obj } = findObject(id) || {};
+    if (obj?.type === "image") updateObjectAttrs(id, v);
+  }
+  renderDoc();
+  if (commit) pushUndo();
+}
+
+["adj-brightness", "adj-contrast", "adj-saturate", "adj-grayscale"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => applyAdjustment(false));
+  document.getElementById(id).addEventListener("change", () => applyAdjustment(true));
+});
+document.getElementById("adj-invert").addEventListener("change", () => applyAdjustment(true));
+
+document.getElementById("btn-reset-adjustments").addEventListener("click", () => {
+  document.getElementById("adj-brightness").value = 100;
+  document.getElementById("adj-contrast").value = 100;
+  document.getElementById("adj-saturate").value = 100;
+  document.getElementById("adj-grayscale").value = 0;
+  document.getElementById("adj-invert").checked = false;
+  applyAdjustment(true);
+});
+
 // Multi-page: these were bound once to the single static #canvas element.
 // Now every page owns its own <svg> (pages.js), so pages.js calls
 // bindPageEvents(svgEl) once per page at creation time instead. Handler
@@ -121,6 +207,7 @@ window.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (currentTool === "pen" && tools.pen.points.length) { tools.pen.cancel(); return; }
     if (dragState) { cancelDrag(); return; }
+    if (cropState) { cropState = null; renderDoc(); return; }
   }
   if (e.key === "Enter" && currentTool === "pen") tools.pen.finish();
 });
@@ -190,6 +277,12 @@ function buildPencilPath(points) {
 const tools = {
   select: {
     down(e) {
+      if (cropState) {
+        const cropHandle = e.target.dataset.cropHandle;
+        if (cropHandle) dragState = { mode: "crop-resize", handle: cropHandle, rect: { ...cropState.rect } };
+        return; // clicks elsewhere while cropping are absorbed, not routed to normal select behavior
+      }
+
       const handle = e.target.dataset.handle;
       const id = e.target.dataset.id;
       const snapshot = JSON.stringify(doc); // cheap pre-drag snapshot, only used if Escape cancels
@@ -235,6 +328,24 @@ const tools = {
 
     move(e) {
       if (!dragState) return;
+
+      if (dragState.mode === "crop-resize") {
+        const p = toDocPoint(e);
+        const b = cropState.bounds;
+        const clampedX = clamp(p.x, b.x, b.x + b.width);
+        const clampedY = clamp(p.y, b.y, b.y + b.height);
+        const r = { ...dragState.rect };
+        if (dragState.handle.includes("w")) { r.width += r.x - clampedX; r.x = clampedX; }
+        if (dragState.handle.includes("e")) { r.width = clampedX - r.x; }
+        if (dragState.handle.includes("n")) { r.height += r.y - clampedY; r.y = clampedY; }
+        if (dragState.handle.includes("s")) { r.height = clampedY - r.y; }
+        if (r.width < 0) { r.x += r.width; r.width = -r.width; }
+        if (r.height < 0) { r.y += r.height; r.height = -r.height; }
+        cropState.rect = { x: r.x, y: r.y, width: Math.max(4, r.width), height: Math.max(4, r.height) };
+        renderDoc();
+        return;
+      }
+
       if (!doc.selectedIds.length && dragState.mode !== "marquee") return;
 
       const p = toDocPoint(e);
@@ -256,6 +367,7 @@ const tools = {
         for (const obj of selectedObjects()) moveObject(obj, dx, dy);
         dragState.start = p;
         renderDoc();
+        applySnapGuides();
         return;
       }
 
@@ -319,6 +431,10 @@ const tools = {
     },
 
     up() {
+      if (dragState?.mode === "crop-resize") {
+        dragState = null; // crop rect isn't undo-tracked itself — only applyCrop()'s result is
+        return;
+      }
       if (dragState?.mode === "marquee") {
         document.getElementById("marquee-box")?.remove();
       }
@@ -327,6 +443,7 @@ const tools = {
       if (dragState && dragDidChange) pushUndo();
       dragState = null;
       dragDidChange = false;
+      clearSnapGuides();
     },
   },
 
@@ -691,4 +808,207 @@ function floodFillImage(obj, point, fillHex) {
     };
     img.src = obj.attrs.href;
   });
+}
+
+// ---------------------------------------------------------------------
+// crop
+// ---------------------------------------------------------------------
+
+function startCrop() {
+  if (doc.selectedIds.length !== 1) { flashStatus("Select a single image to crop"); return; }
+  const { obj } = findObject(doc.selectedIds[0]) || {};
+  if (!obj || obj.type !== "image") return;
+  if (obj.animated) { flashStatus("Can't crop an animated GIF — it would freeze it to one frame"); return; }
+  const bounds = { x: num(obj.attrs.x), y: num(obj.attrs.y), width: num(obj.attrs.width), height: num(obj.attrs.height) };
+  cropState = { id: obj.id, bounds, rect: { ...bounds } };
+  renderDoc();
+}
+
+function cancelCrop() {
+  cropState = null;
+  renderDoc();
+}
+
+// Rasterizes just the cropped pixel region and replaces the image in place —
+// destructive on the pixels (like the fill tool), but that's what "crop"
+// means in MS Paint/Photoshop too. Maps the crop rect from doc space back to
+// source-image pixel space using the image's current display scale.
+function applyCrop() {
+  if (!cropState) return;
+  const { id, rect } = cropState;
+  const found = findObject(id);
+  if (!found) { cropState = null; return; }
+  const { obj } = found;
+
+  const img = new Image();
+  img.onload = () => {
+    const scaleX = img.naturalWidth / num(obj.attrs.width);
+    const scaleY = img.naturalHeight / num(obj.attrs.height);
+    const sx = (rect.x - num(obj.attrs.x)) * scaleX;
+    const sy = (rect.y - num(obj.attrs.y)) * scaleY;
+    const sw = rect.width * scaleX, sh = rect.height * scaleY;
+
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(sw));
+    c.height = Math.max(1, Math.round(sh));
+    c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+
+    obj.attrs.href = c.toDataURL("image/png");
+    obj.attrs.x = rect.x; obj.attrs.y = rect.y;
+    obj.attrs.width = rect.width; obj.attrs.height = rect.height;
+    cropState = null;
+    pushUndo(); renderDoc();
+    flashStatus("Cropped");
+  };
+  img.onerror = () => { flashStatus("Crop failed — couldn't reload the image"); cropState = null; renderDoc(); };
+  img.src = obj.attrs.href;
+}
+
+// ---------------------------------------------------------------------
+// align / distribute / flip — all operate on the current selection and
+// share the same building blocks (getObjectBBox, groupBBox, nudgeObject)
+// used elsewhere for resize/marquee, rather than introducing new geometry.
+// ---------------------------------------------------------------------
+
+// Single selection aligns to the canvas bounds (there's nothing else to align
+// relative to); 2+ selected align to the selection's own combined bbox —
+// the standard multi-select align convention most editors use.
+function alignSelection(edge) {
+  const ids = doc.selectedIds;
+  const items = ids.map(id => ({ id, bbox: getObjectBBox(id) })).filter(x => x.bbox);
+  if (!items.length) return;
+
+  const ref = items.length === 1
+    ? { x: 0, y: 0, width: doc.width, height: doc.height }
+    : groupBBox(items.map(i => i.bbox));
+
+  for (const { id, bbox } of items) {
+    const { obj } = findObject(id);
+    let dx = 0, dy = 0;
+    switch (edge) {
+      case "left":    dx = ref.x - bbox.x; break;
+      case "hcenter": dx = (ref.x + ref.width / 2) - (bbox.x + bbox.width / 2); break;
+      case "right":   dx = (ref.x + ref.width) - (bbox.x + bbox.width); break;
+      case "top":     dy = ref.y - bbox.y; break;
+      case "vcenter": dy = (ref.y + ref.height / 2) - (bbox.y + bbox.height / 2); break;
+      case "bottom":  dy = (ref.y + ref.height) - (bbox.y + bbox.height); break;
+    }
+    nudgeObject(obj, dx, dy);
+  }
+  pushUndo(); renderDoc();
+}
+
+// Evenly spaces 3+ objects between the two extreme objects along an axis;
+// the extremes themselves stay put (standard "distribute" behavior).
+function distributeSelection(axis) {
+  const ids = doc.selectedIds;
+  if (ids.length < 3) { flashStatus("Select at least 3 objects to distribute"); return; }
+  const items = ids.map(id => ({ id, bbox: getObjectBBox(id) })).filter(x => x.bbox);
+  if (items.length < 3) return;
+
+  const centerOf = bbox => axis === "h" ? bbox.x + bbox.width / 2 : bbox.y + bbox.height / 2;
+  const sorted = [...items].sort((a, b) => centerOf(a.bbox) - centerOf(b.bbox));
+  const span = centerOf(sorted[sorted.length - 1].bbox) - centerOf(sorted[0].bbox);
+  const step = span / (sorted.length - 1);
+  const startCenter = centerOf(sorted[0].bbox);
+
+  sorted.forEach((item, i) => {
+    if (i === 0 || i === sorted.length - 1) return;
+    const { obj } = findObject(item.id);
+    const delta = (startCenter + step * i) - centerOf(item.bbox);
+    if (axis === "h") nudgeObject(obj, delta, 0); else nudgeObject(obj, 0, delta);
+  });
+  pushUndo(); renderDoc();
+}
+
+// Mirrors each selected object's own content around its own center (so an
+// image or letterform actually flips, not just its bounding box). For 2+
+// objects, additionally mirrors each one's position around the shared group
+// center — otherwise a multi-object "flip" would leave every shape in place
+// and only flip their insides, which isn't what Photoshop/Canva mean by
+// flipping a selection.
+function flipSelection(axis) {
+  const ids = doc.selectedIds;
+  const items = ids.map(id => ({ id, bbox: getObjectBBox(id) })).filter(x => x.bbox);
+  if (!items.length) return;
+
+  const gb = groupBBox(items.map(i => i.bbox));
+  const groupCx = gb.x + gb.width / 2, groupCy = gb.y + gb.height / 2;
+
+  for (const { id, bbox } of items) {
+    const { obj } = findObject(id);
+    toggleFlip(obj, axis);
+    if (items.length > 1) {
+      if (axis === "h") nudgeObject(obj, 2 * (groupCx - (bbox.x + bbox.width / 2)), 0);
+      else nudgeObject(obj, 0, 2 * (groupCy - (bbox.y + bbox.height / 2)));
+    }
+  }
+  pushUndo(); renderDoc();
+}
+
+// ---------------------------------------------------------------------
+// smart snap guides — Canva/Figma-style: while moving a selection, snap to
+// the canvas's center and edges and show a temporary guide line. Scoped to
+// canvas-relative snapping only (not object-to-object) to keep this
+// contained; a real "align to other shapes" pass can build on the same
+// drawSnapGuides()/clearSnapGuides() plumbing later if wanted.
+// ---------------------------------------------------------------------
+
+const SNAP_THRESHOLD = 6; // doc-space units
+
+function applySnapGuides() {
+  if (currentTool !== "select" || dragState?.mode !== "move") return;
+  const items = doc.selectedIds.map(getObjectBBox).filter(Boolean);
+  if (!items.length) return;
+  const gb = groupBBox(items);
+
+  const vTargets = [0, doc.width / 2, doc.width];
+  const hTargets = [0, doc.height / 2, doc.height];
+  const vPoints = [gb.x, gb.x + gb.width / 2, gb.x + gb.width];
+  const hPoints = [gb.y, gb.y + gb.height / 2, gb.y + gb.height];
+
+  let snapDx = 0, vAt = null;
+  outerV: for (const vp of vPoints) {
+    for (const vt of vTargets) {
+      if (Math.abs(vp - vt) <= SNAP_THRESHOLD) { snapDx = vt - vp; vAt = vt; break outerV; }
+    }
+  }
+  let snapDy = 0, hAt = null;
+  outerH: for (const hp of hPoints) {
+    for (const ht of hTargets) {
+      if (Math.abs(hp - ht) <= SNAP_THRESHOLD) { snapDy = ht - hp; hAt = ht; break outerH; }
+    }
+  }
+
+  if (snapDx || snapDy) {
+    for (const obj of selectedObjects()) moveObject(obj, snapDx, snapDy);
+    renderDoc(); // re-render at the corrected, snapped position before drawing guides
+  }
+  drawSnapGuides(vAt, hAt);
+}
+
+function drawSnapGuides(vAt, hAt) {
+  clearSnapGuides();
+  if (vAt == null && hAt == null) return;
+  const g = document.createElementNS(svgNS, "g");
+  g.id = "snap-guides";
+  if (vAt != null) {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", vAt); line.setAttribute("y1", 0);
+    line.setAttribute("x2", vAt); line.setAttribute("y2", doc.height);
+    line.setAttribute("class", "snap-guide");
+    g.appendChild(line);
+  }
+  if (hAt != null) {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", 0); line.setAttribute("y1", hAt);
+    line.setAttribute("x2", doc.width); line.setAttribute("y2", hAt);
+    line.setAttribute("class", "snap-guide");
+    g.appendChild(line);
+  }
+  canvasEl.appendChild(g);
+}
+
+function clearSnapGuides() {
+  document.getElementById("snap-guides")?.remove();
 }

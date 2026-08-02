@@ -209,6 +209,19 @@ function setRotation(obj, deg) {
   obj.attrs.rotation = deg;
 }
 
+// flipH/flipV — the other transform exception alongside rotation (see
+// canvas.js's applyPendingTransforms). Stored as plain booleans on attrs;
+// canvas.js excludes them from the raw attribute copy and folds them into
+// the same transform string as rotation instead.
+function getFlip(obj) {
+  return { h: !!obj.attrs.flipH, v: !!obj.attrs.flipV };
+}
+
+function toggleFlip(obj, axis) {
+  if (axis === "h") obj.attrs.flipH = !obj.attrs.flipH;
+  else obj.attrs.flipV = !obj.attrs.flipV;
+}
+
 function bboxCenter(bbox) {
   return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
 }

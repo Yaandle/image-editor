@@ -37,6 +37,11 @@
 /* ---- base ------------------------------------------------------------- */
 
 * { box-sizing:border-box; border-radius:0 !important; }
+/* .prop-card/.prop-section/.arrange-row etc. all set their own `display`,
+   which otherwise beats the browser's default [hidden]{display:none} rule
+   (same specificity, but author styles always win over the UA stylesheet) —
+   without this, toggling .hidden = true on those elements would do nothing. */
+[hidden] { display:none !important; }
 
 html, body { height:100%; }
 body {
@@ -193,6 +198,19 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
   fill:rgba(59,130,246,0.12); stroke:rgba(59,130,246,1);
   stroke-width:1; stroke-dasharray:4 2; vector-effect:non-scaling-stroke;
 }
+.crop-dim { fill:rgba(0,0,0,0.55); pointer-events:none; }
+.crop-border {
+  fill:none; stroke:#fff; stroke-width:1.5; stroke-dasharray:4 3;
+  pointer-events:none; vector-effect:non-scaling-stroke;
+}
+.crop-handle { fill:#fff; stroke:rgba(59,130,246,1); stroke-width:1.5; cursor:pointer; }
+.crop-handle:hover { fill:rgba(59,130,246,0.35); }
+
+.snap-guide {
+  stroke:#ff2fd6; stroke-width:1; stroke-dasharray:5 4;
+  pointer-events:none; vector-effect:non-scaling-stroke;
+}
+
 .broken-image-placeholder rect {
   fill:none; stroke:rgba(59,130,246,0.7); stroke-width:1; stroke-dasharray:4 2;
 }
@@ -279,6 +297,9 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
 }
 .anchor-grid button { width:26px; height:26px; padding:0; box-shadow:none; }
 .anchor-grid button.active { background:var(--accent); }
+
+.arrange-row { display:flex; gap:6px; }
+.arrange-row button { flex:1; height:28px; padding:0; font-size:13px; box-shadow:none; }
 
 .primary-action, .secondary-action { height:30px; font-size:11px; }
 .primary-action { background:var(--accent); color:#111; }

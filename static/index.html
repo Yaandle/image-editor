@@ -165,6 +165,72 @@
       </section>
 
 
+      <section class="prop-card" id="prop-arrange" hidden>
+
+        <div class="prop-card-header">
+          <h3>Arrange</h3>
+        </div>
+
+        <div class="prop-section">
+          <h4>Align</h4>
+          <div class="arrange-row">
+            <button data-align="left" title="Align left">⊢</button>
+            <button data-align="hcenter" title="Align center (horizontal)">⊣⊢</button>
+            <button data-align="right" title="Align right">⊣</button>
+            <button data-align="top" title="Align top">⊤</button>
+            <button data-align="vcenter" title="Align middle (vertical)">⊤⊥</button>
+            <button data-align="bottom" title="Align bottom">⊥</button>
+          </div>
+        </div>
+
+        <div class="prop-section">
+          <h4>Distribute</h4>
+          <div class="arrange-row">
+            <button data-distribute="h" title="Distribute horizontally (3+ objects)">↔</button>
+            <button data-distribute="v" title="Distribute vertically (3+ objects)">↕</button>
+          </div>
+        </div>
+
+        <div class="prop-section">
+          <h4>Flip</h4>
+          <div class="arrange-row">
+            <button data-flip="h" title="Flip horizontal">⇋</button>
+            <button data-flip="v" title="Flip vertical">⇵</button>
+          </div>
+        </div>
+
+      </section>
+
+
+      <section class="prop-card" id="prop-adjustments" hidden>
+
+        <div class="prop-card-header">
+          <h3>Adjustments</h3>
+        </div>
+
+        <div class="prop-section">
+          <label class="prop-row-vertical">Brightness <input type="range" id="adj-brightness" min="0" max="200" value="100"></label>
+          <label class="prop-row-vertical">Contrast <input type="range" id="adj-contrast" min="0" max="200" value="100"></label>
+          <label class="prop-row-vertical">Saturation <input type="range" id="adj-saturate" min="0" max="200" value="100"></label>
+          <label class="prop-row-vertical">Grayscale <input type="range" id="adj-grayscale" min="0" max="100" value="0"></label>
+          <label class="prop-checkbox">
+            <input type="checkbox" id="adj-invert">
+            <span>Invert colors</span>
+          </label>
+          <button class="secondary-action" id="btn-reset-adjustments">Reset</button>
+        </div>
+
+        <div class="prop-section" id="crop-controls">
+          <h4>Crop</h4>
+          <button class="secondary-action" id="btn-start-crop">Crop Image</button>
+          <div class="arrange-row" id="crop-active-controls" hidden>
+            <button class="primary-action" id="btn-apply-crop">Apply</button>
+            <button id="btn-cancel-crop">Cancel</button>
+          </div>
+        </div>
+
+      </section>
+
 
       <section class="prop-card">
 
