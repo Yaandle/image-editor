@@ -9,6 +9,13 @@
 //
 // selectedIds is always an array. Never assign doc.selectedId (singular) —
 // that bug has been fixed twice already (setTool, shapeTool.up, pen.finish).
+//
+// Multi-page note: `doc` is still a single bare global, same as before pages
+// existed — it's just that it now always means "whichever page is active."
+// pages.js owns the `pages` array + `activePageId` and reassigns this bare
+// `doc` (plus `canvasEl` in canvas.js) when the active page changes. Every
+// function below is untouched by that — they only ever see "the current
+// doc," exactly like pre-multi-page code.
 
 let doc = null;
 let undoStack = [];
@@ -21,11 +28,16 @@ function uid() {
   return Math.random().toString(36).slice(2, 9) + _uidCounter.toString(36);
 }
 
-function newDocument(width = 900, height = 600) {
+// Pure factory — builds a fresh doc object but does NOT make it live and does
+// NOT touch history. Used by pages.js for every page (initial boot, "+ Add
+// Page", project load) so adding a page never wipes another page's undo
+// history. `background` is the page's matte fill: null/"none" = transparent,
+// else a hex string — used both for on-canvas rendering (canvas.js) and as
+// the flatten colour for JPEG/GIF export (export.js), which have no alpha
+// channel.
+function makeBlankDoc(width = 900, height = 600) {
   const layer = { id: uid(), name: "Layer 1", visible: true, objects: [] };
-  doc = { width, height, layers: [layer], activeLayerId: layer.id, selectedIds: [] };
-  resetHistory();
-  return doc;
+  return { width, height, background: null, layers: [layer], activeLayerId: layer.id, selectedIds: [] };
 }
 
 // Clears undo/redo and re-baselines lastCommitted to the current doc.
@@ -134,6 +146,10 @@ function duplicateObject(id, offset = 10) {
     type: found.obj.type,
     attrs: JSON.parse(JSON.stringify(found.obj.attrs))
   };
+  // animated (GIF import tag, see panels.js) lives outside attrs since it's
+  // not a real SVG attribute — copy it explicitly or a duplicated GIF loses
+  // its "don't flood-fill me" flag.
+  if (found.obj.animated) clone.animated = true;
   nudgeObject(clone, offset, offset);
   found.layer.objects.push(clone);
   return clone;
@@ -334,6 +350,15 @@ const ANCHOR_OFFSETS = {
 // still in the doc (recoverable via undo, or by growing the canvas again),
 // the <svg> root just clips it visually since SVG's default overflow is
 // hidden. Distinct from "Scale image", which will resize content itself.
+// hex: a "#rrggbb" string, or null/"none" for transparent. Reused as-is by
+// the Canvas properties panel's background swatch (panels.js) — same
+// createColorPicker() component fill/stroke already use, just a third wired
+// instance, not a new picker system.
+function setBackground(hex) {
+  if (!doc) return;
+  doc.background = hex && hex !== "none" ? hex : null;
+}
+
 function resizeCanvas(newWidth, newHeight, anchor = "center") {
   if (!doc || !(newWidth > 0) || !(newHeight > 0)) return false;
   const dw = newWidth - doc.width, dh = newHeight - doc.height;
@@ -357,13 +382,24 @@ function resizeCanvas(newWidth, newHeight, anchor = "center") {
 // the undo stack is lastCommitted — the state as of the *previous* commit —
 // not the current serialization. (Pushing the post-edit state made the first
 // undo a silent no-op: the popped snapshot equalled the live doc.)
+//
+// Multi-page: history is ONE global timeline across every page (chosen over
+// per-page histories so Ctrl+Z always undoes your last action regardless of
+// which page it was on, like Figma). A bare doc snapshot alone can't say
+// which page it belongs to, so each stack entry is now { pageId, snapshot }
+// instead of a bare string — same stacks, same MAX_HISTORY cap, same
+// JSON-snapshot strategy, just one extra field. undo()/redo() jump to
+// whichever page an entry belongs to (pages.js's goToPageForHistory) before
+// restoring it, and skip — rather than crash on — entries whose page has
+// since been deleted (page add/remove/reorder themselves aren't part of this
+// history; see pages.js).
 
 let lastCommitted = null;
 
 function pushUndo() {
   if (!doc) return;
   if (lastCommitted != null) {
-    undoStack.push(lastCommitted);
+    undoStack.push({ pageId: activePageId, snapshot: lastCommitted });
     if (undoStack.length > MAX_HISTORY) undoStack.shift();
   }
   lastCommitted = JSON.stringify(doc);
@@ -371,19 +407,31 @@ function pushUndo() {
 }
 
 function undo() {
-  if (!undoStack.length) return;
-  redoStack.push(JSON.stringify(doc));
-  doc = JSON.parse(undoStack.pop());
-  lastCommitted = JSON.stringify(doc);
-  renderDoc(); renderLayers();
+  while (undoStack.length) {
+    const entry = undoStack.pop();
+    if (!getPage(entry.pageId)) continue; // its page was deleted since this was recorded — inert, skip
+    redoStack.push({ pageId: activePageId, snapshot: JSON.stringify(doc) });
+    goToPageForHistory(entry.pageId);
+    doc = JSON.parse(entry.snapshot);
+    lastCommitted = JSON.stringify(doc);
+    syncActivePageDoc();
+    renderDoc(); renderLayers();
+    return;
+  }
 }
 
 function redo() {
-  if (!redoStack.length) return;
-  undoStack.push(JSON.stringify(doc));
-  doc = JSON.parse(redoStack.pop());
-  lastCommitted = JSON.stringify(doc);
-  renderDoc(); renderLayers();
+  while (redoStack.length) {
+    const entry = redoStack.pop();
+    if (!getPage(entry.pageId)) continue;
+    undoStack.push({ pageId: activePageId, snapshot: JSON.stringify(doc) });
+    goToPageForHistory(entry.pageId);
+    doc = JSON.parse(entry.snapshot);
+    lastCommitted = JSON.stringify(doc);
+    syncActivePageDoc();
+    renderDoc(); renderLayers();
+    return;
+  }
 }
 
 function canUndo() {

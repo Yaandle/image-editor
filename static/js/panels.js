@@ -23,7 +23,7 @@ document.getElementById("btn-theme").addEventListener("click", () => {
   const root = document.documentElement;
   root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
   localStorage.setItem("imagekit_theme", root.dataset.theme);
-  renderDoc();
+  renderAllPages(); // every mounted page's svg, not just the active one
 });
 
 // ---------------------------------------------------------------------
@@ -147,8 +147,12 @@ function syncCanvasPropertiesPanel() {
   if (!doc) return;
   const widthEl = document.getElementById("canvas-width");
   const heightEl = document.getElementById("canvas-height");
+  const bgEl = document.getElementById("canvas-background");
   if (widthEl && document.activeElement !== widthEl) widthEl.value = doc.width;
   if (heightEl && document.activeElement !== heightEl) heightEl.value = doc.height;
+  // Same shallow sync fill/stroke get in tools.js's syncPropertyPanelToSelection:
+  // reflects the value, doesn't rebuild the colorPicker popover's own HSV state.
+  if (bgEl) bgEl.value = doc.background || "none";
 }
 
 let canvasResizeAnchor = "center";
@@ -206,6 +210,14 @@ function initCanvasPropertiesPanel() {
       flashStatus(`Canvas resized to ${w} × ${h}`);
     }
   });
+
+  // Background swatch — doc-level property, not an object attribute, so it
+  // doesn't go through updateObjectAttrs()/applyPropertyChange() like
+  // fill/stroke do; it's routed straight through document.js's setBackground().
+  document.getElementById("canvas-background")?.addEventListener("change", e => {
+    setBackground(e.target.value);
+    pushUndo(); renderDoc();
+  });
 }
 initCanvasPropertiesPanel();
 
@@ -220,11 +232,22 @@ document.getElementById("file-input").addEventListener("change", e => {
   e.target.value = "";
 });
 
-canvasEl.addEventListener("dragover", e => e.preventDefault());
-canvasEl.addEventListener("drop", e => {
+// Drag-and-drop used to bind directly to the single #canvas element. Now
+// there's one <svg> per page, so instead of rebinding this per page (like
+// tools.js's pointer events, which need per-page pointer-capture semantics),
+// it's simpler to delegate once from the stable #page-stack container and
+// figure out which page box the drop actually landed on — plain import,
+// no drag semantics to preserve.
+const pageStackEl = document.getElementById("page-stack");
+pageStackEl.addEventListener("dragover", e => e.preventDefault());
+pageStackEl.addEventListener("drop", e => {
   e.preventDefault();
   const file = e.dataTransfer.files?.[0];
-  if (file) importImageFile(file);
+  if (!file) return;
+  const wrap = e.target.closest(".page-wrap");
+  const page = wrap && pages.find(p => p.wrapEl === wrap);
+  if (page && page.id !== activePageId) switchActivePage(page.id);
+  importImageFile(file);
 });
 
 function importImageFile(file) {
@@ -232,6 +255,13 @@ function importImageFile(file) {
     flashStatus(`"${file.name}" isn't an image file`);
     return;
   }
+  // GIF mime already passes the check above — GIF import runs through the
+  // exact same path as any other image. The only special-casing it needs:
+  // tag the object so the fill tool and export logic can tell it's animated.
+  // Playback itself is free — an SVG <image> whose href decodes to an
+  // animated GIF just plays natively once it's in the live DOM; no extra
+  // render loop needed.
+  const isGif = file.type === "image/gif";
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
@@ -240,10 +270,12 @@ function importImageFile(file) {
       const h = w * (img.naturalHeight / img.naturalWidth);
       const obj = addObject({
         id: uid(), type: "image",
-        attrs: { x: (doc.width - w) / 2, y: (doc.height - h) / 2, width: w, height: h, href: reader.result }
+        attrs: { x: (doc.width - w) / 2, y: (doc.height - h) / 2, width: w, height: h, href: reader.result },
+        ...(isGif ? { animated: true } : {}),
       });
       selectOnly(obj.id);
       pushUndo(); renderDoc();
+      if (isGif) flashStatus(`Imported "${file.name}" — playing live on canvas`);
     };
     img.onerror = () => flashStatus(`Couldn't load "${file.name}"`);
     img.src = reader.result;
@@ -276,6 +308,13 @@ function flashStatus(msg) {
 let objectClipboard = [];
 
 window.addEventListener("keydown", e => {
+  // Native <dialog> modality blocks pointer interaction with the rest of the
+  // page but not keyboard events reaching window listeners — without this,
+  // focusing the Download dialog's Cancel/Download buttons (tag=BUTTON, so
+  // not caught by the INPUT/SELECT check below) would let Delete/Ctrl+C/
+  // arrow-nudge/etc. reach the canvas underneath.
+  if (document.getElementById("download-dialog")?.open) return;
+
   const tag = document.activeElement.tagName;
   if (tag === "INPUT" || tag === "SELECT") return;
 
@@ -297,6 +336,7 @@ window.addEventListener("keydown", e => {
       const newIds = [];
       for (const src of objectClipboard) {
         const clone = { id: uid(), type: src.type, attrs: JSON.parse(JSON.stringify(src.attrs)) };
+        if (src.animated) clone.animated = true; // preserve the GIF tag — see duplicateObject()'s note in document.js
         nudgeObject(clone, 10, 10);
         addObject(clone);
         newIds.push(clone.id);

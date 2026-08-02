@@ -117,23 +117,57 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
 .tool svg, #btn-import svg, #btn-undo svg, #btn-redo svg { width:18px; height:18px; }
 #stroke-width { width:100%; }
 
-/* ---- canvas ----------------------------------------------------------- */
+/* ---- canvas / page stack ------------------------------------------------ */
 
+/* #canvas-area now scrolls a vertical stack of independent pages (Figma-
+   frames style) instead of centering one fixed #canvas element. */
 #canvas-area {
-  flex:1; overflow:auto; display:flex;
-  align-items:safe center; justify-content:safe center;
+  flex:1; overflow:auto; display:flex; flex-direction:column;
+  align-items:center; gap:20px;
   background:var(--bg-inset); padding:24px;
 }
-#canvas {
+
+#page-stack {
+  display:flex; flex-direction:column; align-items:center; gap:32px;
+  width:100%;
+}
+
+.page-wrap {
+  display:flex; flex-direction:column; align-items:center; gap:6px; flex:none;
+}
+.page-label {
+  display:flex; align-items:center; gap:6px; width:100%; max-width:100%;
+  font-size:10px; color:var(--text-muted);
+}
+.page-wrap.active-page .page-label { color:var(--text-primary); }
+.page-label .page-drag-handle { cursor:grab; padding:0 2px; }
+.page-label .page-drag-handle:active { cursor:grabbing; }
+.page-label .page-name {
+  flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.page-label button {
+  border:none; background:transparent; box-shadow:none;
+  width:18px; height:18px; padding:0; font-size:10px; line-height:1; color:inherit;
+}
+.page-label button:hover { background:var(--bg-control-hover); }
+.page-label button:active { transform:none; }
+.page-rename-input {
+  flex:1; min-width:0; font-size:10px; padding:1px 4px; box-shadow:none;
+}
+
+.page-canvas {
   background:#fff; border:var(--border-w) solid var(--border);
   box-shadow:var(--shadow); display:block; flex:none;
 }
-#canvas.tool-select { cursor:default; }
-#canvas.tool-rect, #canvas.tool-ellipse, #canvas.tool-line,
-#canvas.tool-pen, #canvas.tool-pencil { cursor:crosshair; }
-#canvas.tool-text { cursor:text; }
-#canvas.tool-fill { cursor:cell; }
-#canvas [data-id]:not(.broken-image-placeholder) { cursor:move; }
+.page-wrap.active-page .page-canvas { border-color:var(--accent); }
+.page-canvas.tool-select { cursor:default; }
+.page-canvas.tool-rect, .page-canvas.tool-ellipse, .page-canvas.tool-line,
+.page-canvas.tool-pen, .page-canvas.tool-pencil { cursor:crosshair; }
+.page-canvas.tool-text { cursor:text; }
+.page-canvas.tool-fill { cursor:cell; }
+.page-canvas [data-id]:not(.broken-image-placeholder) { cursor:move; }
+
+#btn-add-page { flex:none; width:220px; }
 
 /* canvas-drawn overlay UI — blue selection language, square handles */
 .selection-box {
@@ -234,6 +268,11 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
 }
 .prop-checkbox input { accent-color:var(--accent); }
 
+.prop-color-row {
+  display:flex; align-items:center; gap:8px;
+  font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted);
+}
+
 .anchor-grid {
   display:grid; grid-template-columns:repeat(3,26px); gap:6px;
   justify-content:center; padding:4px 0;
@@ -310,6 +349,33 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
   opacity:0; pointer-events:none; transition:opacity .15s ease;
 }
 #status-toast.visible { opacity:1; }
+
+/* ---- download dialog ----------------------------------------------------- */
+
+#download-dialog {
+  width:280px; padding:16px;
+  border:var(--border-w-lg) solid var(--border);
+  box-shadow:var(--shadow); background:var(--bg-surface); color:var(--text-primary);
+}
+#download-dialog::backdrop { background:var(--overlay-scrim); }
+#download-form { display:flex; flex-direction:column; gap:12px; }
+#download-form h3 {
+  margin:0; font-size:11px; letter-spacing:1px; text-transform:uppercase;
+  border-bottom:2px solid var(--border-hairline); padding-bottom:6px;
+}
+.prop-row-vertical {
+  display:flex; flex-direction:column; gap:4px;
+  font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted);
+}
+.prop-row-vertical select, .prop-row-vertical input { width:100%; }
+#download-pages {
+  border:var(--border-w) solid var(--border-hairline); padding:8px;
+  display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto;
+}
+#download-pages legend {
+  font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted); padding:0 4px;
+}
+.dialog-actions { display:flex; justify-content:flex-end; gap:8px; }
 
 /* ---- colour picker ------------------------------------------------------ */
 

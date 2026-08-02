@@ -8,7 +8,12 @@
 // correctly before rotation is applied.
 
 const svgNS = "http://www.w3.org/2000/svg";
-const canvasEl = document.getElementById("canvas");
+// Multi-page: was `const canvasEl = document.getElementById("canvas")` when
+// there was exactly one <svg> in the whole app. Now every page has its own
+// <svg> (pages.js), and canvasEl means "whichever page's svg is currently
+// active" — pages.js reassigns it on every page switch. Every function below
+// still just reads bare `canvasEl`, unchanged from before pages existed.
+let canvasEl = null;
 const TAGS = { rect: "rect", ellipse: "ellipse", line: "line", path: "path", text: "text", image: "image" };
 
 // All chrome/overlay styling lives in style.css and reads the shared
@@ -19,6 +24,20 @@ function renderDoc() {
   canvasEl.setAttribute("height", doc.height);
   canvasEl.setAttribute("viewBox", `0 0 ${doc.width} ${doc.height}`);
   canvasEl.innerHTML = "";
+
+  // Background fill (doc.background) — a plain rect, not a layer object:
+  // regenerated from doc.background every render rather than stored in
+  // layers, so it never shows up in selection/hit-testing/allObjectIds() and
+  // never needs special-casing in undo (it's just data on doc, like width).
+  if (doc.background) {
+    const bg = document.createElementNS(svgNS, "rect");
+    bg.setAttribute("x", 0); bg.setAttribute("y", 0);
+    bg.setAttribute("width", doc.width); bg.setAttribute("height", doc.height);
+    bg.setAttribute("fill", doc.background);
+    bg.setAttribute("data-role", "background");
+    bg.style.pointerEvents = "none";
+    canvasEl.appendChild(bg);
+  }
 
   for (const layer of doc.layers) {
     if (!layer.visible) continue;

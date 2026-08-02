@@ -24,6 +24,8 @@
       <button data-export="png">PNG</button>
       <button data-export="jpeg">JPEG</button>
       <div class="toolbar-sep"></div>
+      <button id="btn-download" title="Export as PNG/JPEG/GIF/SVG, choosing which pages to include">DOWNLOAD</button>
+      <div class="toolbar-sep"></div>
       <button id="btn-theme" title="Toggle theme">◐</button>
     </div>
   </header>
@@ -78,7 +80,8 @@
   </aside>
 
     <main id="canvas-area">
-      <svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="page-stack"></div>
+      <button id="btn-add-page" class="secondary-action">+ Add Page</button>
     </main>
 
     <aside id="properties-panel">
@@ -116,6 +119,15 @@
             <span>Lock aspect ratio</span>
           </label>
 
+        </div>
+
+
+        <div class="prop-section">
+          <label class="prop-color-row">
+            <span>Background</span>
+            <div id="bg-color-picker"></div>
+            <input type="hidden" id="canvas-background" value="none">
+          </label>
         </div>
 
 
@@ -171,6 +183,38 @@
 
   </div>
 
+  <dialog id="download-dialog">
+    <form method="dialog" id="download-form">
+      <h3>Download</h3>
+
+      <label class="prop-row-vertical">
+        File type
+        <select id="download-type">
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+          <option value="gif">GIF</option>
+          <option value="svg">SVG</option>
+        </select>
+      </label>
+
+      <div id="download-gif-options">
+        <label class="prop-row-vertical">
+          Seconds per animated page
+          <input type="number" id="download-gif-seconds" value="2.5" min="0.5" max="30" step="0.5">
+        </label>
+      </div>
+
+      <fieldset id="download-pages">
+        <legend>Pages</legend>
+      </fieldset>
+
+      <div class="dialog-actions">
+        <button type="button" id="download-cancel">Cancel</button>
+        <button type="submit" id="download-confirm" class="primary-action">Download</button>
+      </div>
+    </form>
+  </dialog>
+
   <footer id="statusbar">
     <span id="status-dot" title="Backend connection"></span>
     <span id="status-text">OFFLINE</span>
@@ -179,8 +223,10 @@
 
   <script src="js/document.js"></script>
   <script src="js/canvas.js"></script>
+  <script src="js/pages.js"></script>
   <script src="js/tools.js"></script>
   <script src="js/panels.js"></script>
+  <script src="js/gifEncoder.js"></script>
   <script src="js/export.js"></script>
   <script src="js/app.js"></script>
   <script type="module">
@@ -206,6 +252,7 @@
 
   wire('fill-color-picker', 'fill-color');
   wire('stroke-color-picker', 'stroke-color');
+  wire('bg-color-picker', 'canvas-background');
   </script>
 </body>
 </html>

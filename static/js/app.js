@@ -6,8 +6,8 @@
 // tools.js/panels.js/export.js, not here.
 
 try {
-  doc = newDocument();
-  renderDoc();
+  initPages(); // pages.js — creates Page 1, makes it the active doc/canvasEl
+  renderAllPages();
   renderLayers();
   setTool("select");
 

@@ -15,7 +15,10 @@ function setTool(name) {
   tools.pen.cancel?.();
   clearSelection();
   document.querySelectorAll(".tool").forEach(b => b.classList.toggle("active", b.dataset.tool === name));
-  canvasEl.className = `tool-${name}`;
+  // Tool state is shared across every page (spec: "shares the same tool
+  // state and color picker"), so the cursor affordance should be too — every
+  // page's svg gets the class, not just the currently-active one.
+  for (const page of pages) page.svgEl.className = `tool-${name}`;
   renderDoc();
 }
 
@@ -86,19 +89,34 @@ function syncPropertyPanelToSelection() {
   }
 }
 
-canvasEl.addEventListener("pointerdown", e => tools[currentTool]?.down(e));
-canvasEl.addEventListener("pointermove", e => {
-  updateHoverCursor(e);
-  tools[currentTool]?.move(e);
-});
+// Multi-page: these were bound once to the single static #canvas element.
+// Now every page owns its own <svg> (pages.js), so pages.js calls
+// bindPageEvents(svgEl) once per page at creation time instead. Handler
+// bodies are unchanged from the single-canvas version — pointerdown just
+// additionally (a) activates that page as the one tools/undo apply to, and
+// (b) captures the pointer so a drag that strays past this page's visual
+// boundary still targets this page's doc, not whatever page is physically
+// underneath the cursor once pages are stacked vertically.
+function bindPageEvents(svgEl) {
+  svgEl.addEventListener("pointerdown", e => {
+    activatePageFromEvent(e);
+    svgEl.setPointerCapture(e.pointerId);
+    tools[currentTool]?.down(e);
+  });
+  svgEl.addEventListener("pointermove", e => {
+    updateHoverCursor(e);
+    tools[currentTool]?.move(e);
+  });
+  svgEl.addEventListener("dblclick", e => {
+    activatePageFromEvent(e);
+    const id = e.target.dataset.id;
+    if (currentTool === "pen") { tools.pen.finish(); return; }
+    if (!id) return;
+    const { obj } = findObject(id);
+    if (obj.type === "text") editTextInline(obj);
+  });
+}
 window.addEventListener("pointerup", e => tools[currentTool]?.up(e));
-canvasEl.addEventListener("dblclick", e => {
-  const id = e.target.dataset.id;
-  if (currentTool === "pen") { tools.pen.finish(); return; }
-  if (!id) return;
-  const { obj } = findObject(id);
-  if (obj.type === "text") editTextInline(obj);
-});
 window.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (currentTool === "pen" && tools.pen.points.length) { tools.pen.cancel(); return; }
@@ -113,7 +131,10 @@ window.addEventListener("keydown", e => {
 function updateHoverCursor(e) {
   if (currentTool !== "select") return;
   const cursor = e.target?.dataset?.cursor;
-  canvasEl.style.cursor = cursor || (e.target?.dataset?.id ? "move" : "default");
+  // e.currentTarget (the page svg this listener is bound to), not the bare
+  // `canvasEl` global — hovering a non-active page shouldn't wait for a
+  // click to get its own cursor feedback.
+  e.currentTarget.style.cursor = cursor || (e.target?.dataset?.id ? "move" : "default");
 }
 
 // Reverts to the state at drag-start without touching the undo stack —
@@ -456,8 +477,19 @@ const tools = {
       const id = e.target.dataset.id;
       if (!id) return;
       const { obj } = findObject(id);
-      if (obj.type === "image") await floodFillImage(obj, toDocPoint(e), currentStyle().fill);
-      else obj.attrs.fill = currentStyle().fill;
+      if (obj.type === "image") {
+        // Flood-fill rasterizes via canvas 2D drawImage(), which only ever
+        // samples a GIF's current frame — running it on an animated import
+        // would silently bake that one frame in as a static PNG and kill the
+        // animation. Refuse instead of corrupting it quietly.
+        if (obj.animated) {
+          flashStatus("Can't bucket-fill an animated GIF — it would freeze it to one frame");
+          return;
+        }
+        await floodFillImage(obj, toDocPoint(e), currentStyle().fill);
+      } else {
+        obj.attrs.fill = currentStyle().fill;
+      }
       pushUndo(); renderDoc();
     },
     move() {}, up() {},
