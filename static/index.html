@@ -19,6 +19,10 @@
       <select id="project-list"><option value="">LOAD…</option></select>
       <button id="btn-new">NEW</button>
     </div>
+    <div id="playback-controls">
+      <button id="btn-play" title="Play the active page's enter/exit animations">▶ Play</button>
+    </div>
+    <div class="toolbar-sep"></div>
     <div id="export-controls">
       <button data-export="svg">SVG</button>
       <button data-export="png">PNG</button>
@@ -135,6 +139,19 @@
         </div>
 
 
+        <div class="prop-section">
+          <h4>Playback</h4>
+          <label class="prop-row-vertical">
+            Hold before exit (ms)
+            <input type="number" id="anim-hold" min="0" max="20000" step="100">
+          </label>
+          <label class="prop-checkbox">
+            <input type="checkbox" id="anim-loop">
+            <span>Loop</span>
+          </label>
+        </div>
+
+
         <div class="prop-section anchor-section">
 
           <h4>Anchor Position</h4>
@@ -198,6 +215,49 @@
             <button data-flip="v" title="Flip vertical">⇵</button>
           </div>
         </div>
+
+      </section>
+
+
+      <section class="prop-card" id="prop-animate" hidden>
+
+        <div class="prop-card-header">
+          <h3>Animate</h3>
+        </div>
+
+        <div class="prop-section">
+          <h4>Enter</h4>
+          <label class="prop-row-vertical">
+            Effect
+            <select id="anim-enter-type"></select>
+          </label>
+          <div class="prop-row large-gap">
+            <label>Duration (ms) <input type="number" id="anim-enter-duration" min="0" max="10000" step="50"></label>
+            <label>Delay (ms) <input type="number" id="anim-enter-delay" min="0" max="10000" step="50"></label>
+          </div>
+          <label class="prop-row-vertical">
+            Easing
+            <select id="anim-enter-easing"></select>
+          </label>
+        </div>
+
+        <div class="prop-section">
+          <h4>Exit</h4>
+          <label class="prop-row-vertical">
+            Effect
+            <select id="anim-exit-type"></select>
+          </label>
+          <div class="prop-row large-gap">
+            <label>Duration (ms) <input type="number" id="anim-exit-duration" min="0" max="10000" step="50"></label>
+            <label>Delay (ms) <input type="number" id="anim-exit-delay" min="0" max="10000" step="50"></label>
+          </div>
+          <label class="prop-row-vertical">
+            Easing
+            <select id="anim-exit-easing"></select>
+          </label>
+        </div>
+
+        <p class="prop-hint" id="anim-multi-hint" hidden>Editing applies to all selected objects.</p>
 
       </section>
 
@@ -288,6 +348,12 @@
   <footer id="statusbar">
     <span id="status-dot" title="Backend connection"></span>
     <span id="status-text">OFFLINE</span>
+    <span id="zoom-controls" title="Ctrl + scroll to zoom">
+      <button id="btn-zoom-out" title="Zoom out">−</button>
+      <span id="zoom-label">100%</span>
+      <button id="btn-zoom-in" title="Zoom in">+</button>
+      <button id="btn-zoom-reset" title="Reset zoom">Reset</button>
+    </span>
     <span id="status-hint">V SELECT · R RECT · E ELLIPSE · L LINE · P PEN · B PENCIL · T TEXT · F FILL</span>
   </footer>
 
@@ -295,6 +361,7 @@
   <script src="js/canvas.js"></script>
   <script src="js/pages.js"></script>
   <script src="js/tools.js"></script>
+  <script src="js/animate.js"></script>
   <script src="js/panels.js"></script>
   <script src="js/gifEncoder.js"></script>
   <script src="js/export.js"></script>

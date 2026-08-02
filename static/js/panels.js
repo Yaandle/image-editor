@@ -187,6 +187,13 @@ function syncCanvasPropertiesPanel() {
   // Same shallow sync fill/stroke get in tools.js's syncPropertyPanelToSelection:
   // reflects the value, doesn't rebuild the colorPicker popover's own HSV state.
   if (bgEl) bgEl.value = doc.background || "none";
+
+  // Playback (Hold/Loop) — page-level animation timing, see document.js's
+  // makeBlankDoc(). Same skip-while-focused convention as width/height above.
+  const holdEl = document.getElementById("anim-hold");
+  const loopEl = document.getElementById("anim-loop");
+  if (holdEl && document.activeElement !== holdEl) holdEl.value = doc.animHold ?? 1500;
+  if (loopEl) loopEl.checked = doc.animLoop !== false;
 }
 
 let canvasResizeAnchor = "center";
@@ -252,8 +259,113 @@ function initCanvasPropertiesPanel() {
     setBackground(e.target.value);
     pushUndo(); renderDoc();
   });
+
+  // Playback (Hold/Loop) — same doc-level pattern as background above, not
+  // routed through updateObjectAttrs() since it isn't an object attribute.
+  document.getElementById("anim-hold")?.addEventListener("change", e => {
+    const ms = Math.max(0, parseFloat(e.target.value) || 0);
+    doc.animHold = ms;
+    pushUndo();
+  });
+  document.getElementById("anim-loop")?.addEventListener("change", e => {
+    doc.animLoop = e.target.checked;
+    pushUndo();
+  });
 }
 initCanvasPropertiesPanel();
+
+// ---------------------------------------------------------------------
+// Animate panel — per-object enter/exit effect, duration/delay/easing.
+// Reflects the first selected object's values (same convention as
+// syncPropertyPanelToSelection's fill/stroke sync) but a committed edit
+// applies to every selected object at once — "edit individually, or select
+// several to change them all together," per the spec.
+// ---------------------------------------------------------------------
+
+function populateAnimSelects() {
+  const fill = (id, options) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = options.map(o => `<option value="${o.value}">${o.label}</option>`).join("");
+  };
+  fill("anim-enter-type", ANIM_TYPES);
+  fill("anim-exit-type", ANIM_TYPES);
+  fill("anim-enter-easing", EASING_TYPES);
+  fill("anim-exit-easing", EASING_TYPES);
+}
+populateAnimSelects();
+
+function animInputs(phase) {
+  return {
+    type: document.getElementById(`anim-${phase}-type`),
+    duration: document.getElementById(`anim-${phase}-duration`),
+    delay: document.getElementById(`anim-${phase}-delay`),
+    easing: document.getElementById(`anim-${phase}-easing`),
+  };
+}
+
+function wireAnimPhase(phase) {
+  const inputs = animInputs(phase);
+  const commit = () => {
+    if (!doc || !doc.selectedIds.length) return;
+    const patch = {
+      type: inputs.type.value,
+      duration: Math.max(0, parseFloat(inputs.duration.value) || 0),
+      delay: Math.max(0, parseFloat(inputs.delay.value) || 0),
+      easing: inputs.easing.value,
+    };
+    for (const obj of selectedObjects()) setObjectAnimPhase(obj, phase, patch);
+    pushUndo(); renderDoc();
+  };
+  inputs.type.addEventListener("change", commit);
+  inputs.duration.addEventListener("change", commit);
+  inputs.delay.addEventListener("change", commit);
+  inputs.easing.addEventListener("change", commit);
+}
+wireAnimPhase("enter");
+wireAnimPhase("exit");
+
+// Called from canvas.js's renderDoc() (syncSelectionDependentPanels), same
+// single-hook pattern as the Arrange/Adjustments cards — shows the card for
+// ANY selection (every object type is animatable, unlike Adjustments which
+// is images-only) and reflects the first selected object's anim config.
+function syncAnimPanel() {
+  const ids = doc?.selectedIds || [];
+  const card = document.getElementById("prop-animate");
+  if (card) card.hidden = ids.length === 0;
+  if (!ids.length) return;
+
+  const firstObj = selectedObjects()[0];
+  if (!firstObj) return;
+  const anim = firstObj.anim || { enter: { ...ANIM_PHASE_DEFAULTS }, exit: { ...ANIM_PHASE_DEFAULTS } };
+
+  for (const phase of ["enter", "exit"]) {
+    const inputs = animInputs(phase);
+    const val = anim[phase] || ANIM_PHASE_DEFAULTS;
+    if (document.activeElement !== inputs.type) inputs.type.value = val.type;
+    if (document.activeElement !== inputs.duration) inputs.duration.value = val.duration;
+    if (document.activeElement !== inputs.delay) inputs.delay.value = val.delay;
+    if (document.activeElement !== inputs.easing) inputs.easing.value = val.easing;
+  }
+
+  const hint = document.getElementById("anim-multi-hint");
+  if (hint) hint.hidden = ids.length <= 1;
+}
+
+// ---------------------------------------------------------------------
+// Play / Stop — toggles the active page's live animation preview
+// (animate.js). Button label/state is driven from here since animate.js
+// has no DOM-owning responsibilities of its own.
+// ---------------------------------------------------------------------
+
+document.getElementById("btn-play").addEventListener("click", togglePlayback);
+
+function setPlayButtonState(playing) {
+  const btn = document.getElementById("btn-play");
+  if (!btn) return;
+  btn.textContent = playing ? "■ Stop" : "▶ Play";
+  btn.classList.toggle("playing", playing);
+}
 
 // ---------------------------------------------------------------------
 // image import — file picker + drag-and-drop onto canvas, one shared path
@@ -365,21 +477,12 @@ window.addEventListener("keydown", e => {
     e.preventDefault(); return;
   }
 
-  if (e.ctrlKey && e.key.toLowerCase() === "v") { // paste into active layer, offset
-    if (objectClipboard.length) {
-      const newIds = [];
-      for (const src of objectClipboard) {
-        const clone = { id: uid(), type: src.type, attrs: JSON.parse(JSON.stringify(src.attrs)) };
-        if (src.animated) clone.animated = true; // preserve the GIF tag — see duplicateObject()'s note in document.js
-        nudgeObject(clone, 10, 10);
-        addObject(clone);
-        newIds.push(clone.id);
-      }
-      doc.selectedIds = newIds;
-      pushUndo(); renderDoc();
-    }
-    e.preventDefault(); return;
-  }
+  // Ctrl+V itself is deliberately NOT handled here — see the "paste" event
+  // listener below. keydown fires before "paste", and preventDefault()-ing
+  // Ctrl+V's keydown suppresses the browser's paste event entirely, which
+  // would make it impossible to ever read the system clipboard (images/text
+  // copied from outside the app). Internal in-app copy/paste now rides the
+  // same "paste" event instead, just prioritized ahead of OS clipboard data.
 
   if (e.ctrlKey && e.key.toLowerCase() === "d") { // duplicate selection
     if (doc.selectedIds.length) {
@@ -449,5 +552,102 @@ window.addEventListener("keydown", e => {
   const map = { v: "select", r: "rect", e: "ellipse", l: "line", p: "pen", b: "pencil", t: "text", f: "fill" };
   if (map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
 });
+
+// ---------------------------------------------------------------------
+// paste — system clipboard (images/text copied from outside inkkit) as
+// well as inkkit's own internal Ctrl+C clipboard, unified on the native
+// "paste" event since that's the only event that actually carries
+// clipboardData. Priority: internal clipboard first (it's full object data
+// the OS clipboard can't represent, and the more recent explicit action if
+// you just duplicated something inside inkkit), then an image straight off
+// the OS clipboard, then plain text.
+// ---------------------------------------------------------------------
+
+window.addEventListener("paste", e => {
+  const tag = document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return; // let native paste happen (renaming, text editing, dialog fields)
+  if (document.getElementById("download-dialog")?.open) return;
+
+  if (objectClipboard.length) {
+    e.preventDefault();
+    pasteInternalClipboard();
+    return;
+  }
+
+  const items = e.clipboardData?.items;
+  if (items) {
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) { e.preventDefault(); importImageFile(file); return; }
+      }
+    }
+  }
+
+  const text = e.clipboardData?.getData("text/plain");
+  if (text && text.trim()) {
+    e.preventDefault();
+    pasteTextObject(text.trim());
+  }
+});
+
+function pasteInternalClipboard() {
+  const newIds = [];
+  for (const src of objectClipboard) {
+    const clone = { id: uid(), type: src.type, attrs: JSON.parse(JSON.stringify(src.attrs)) };
+    if (src.animated) clone.animated = true; // GIF tag — see duplicateObject()'s note in document.js
+    if (src.anim) clone.anim = JSON.parse(JSON.stringify(src.anim)); // enter/exit animation, same reasoning
+    nudgeObject(clone, 10, 10);
+    addObject(clone);
+    newIds.push(clone.id);
+  }
+  doc.selectedIds = newIds;
+  pushUndo(); renderDoc();
+}
+
+function pasteTextObject(text) {
+  const obj = addObject({
+    id: uid(), type: "text",
+    attrs: { x: doc.width / 2 - 60, y: doc.height / 2, "font-size": 24, fill: currentStyle().fill, content: text },
+  });
+  selectOnly(obj.id);
+  pushUndo(); renderDoc();
+  flashStatus("Pasted text");
+}
+
+// ---------------------------------------------------------------------
+// zoom — Ctrl+scroll over the canvas area, zoom-to-cursor. viewZoom/setZoom
+// live in pages.js (shared across pages, applied as a CSS size); this is
+// just the input binding + the status-bar readout.
+// ---------------------------------------------------------------------
+
+const canvasArea = document.getElementById("canvas-area");
+
+canvasArea.addEventListener("wheel", e => {
+  if (!e.ctrlKey) return; // plain scroll still scrolls the page stack normally
+  e.preventDefault();
+
+  // Zoom-to-cursor: keep the document point under the mouse fixed on screen
+  // by adjusting scroll offsets by the same ratio the zoom just changed by.
+  const rect = canvasArea.getBoundingClientRect();
+  const cx = e.clientX - rect.left + canvasArea.scrollLeft;
+  const cy = e.clientY - rect.top + canvasArea.scrollTop;
+
+  const prevZoom = viewZoom;
+  const factor = Math.exp(-e.deltaY * 0.0015); // smooth for both trackpad and wheel deltas
+  setZoom(prevZoom * factor);
+  const ratio = viewZoom / prevZoom;
+
+  canvasArea.scrollLeft = cx * ratio - (e.clientX - rect.left);
+  canvasArea.scrollTop = cy * ratio - (e.clientY - rect.top);
+}, { passive: false });
+
+document.getElementById("btn-zoom-in").addEventListener("click", () => setZoom(viewZoom * 1.25));
+document.getElementById("btn-zoom-out").addEventListener("click", () => setZoom(viewZoom / 1.25));
+document.getElementById("btn-zoom-reset").addEventListener("click", resetZoom);
+
+function updateZoomLabel() {
+  document.getElementById("zoom-label").textContent = Math.round(viewZoom * 100) + "%";
+}
 
 // Panel chrome styling lives in style.css — this file only builds DOM.

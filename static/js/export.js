@@ -29,6 +29,7 @@ function serializeSVG() {
 }
 
 function exportSVG() {
+  stopPlayback(); // animate.js — never bake a mid-animation frame into a static export
   download(new Blob([serializeSVG()], { type: "image/svg+xml" }), `${projectName()}.svg`);
 }
 
@@ -59,6 +60,7 @@ function rasterizePage(page, type) {
 }
 
 function exportRaster(type) {
+  stopPlayback(); // animate.js — same reasoning as exportSVG()
   const page = getPage(activePageId);
   rasterizePage(page, type)
     .then(blob => download(blob, `${projectName()}.${type === "jpeg" ? "jpg" : "png"}`))
@@ -251,6 +253,9 @@ document.getElementById("download-form").addEventListener("submit", async e => {
 });
 
 async function runDownload(type, selectedPages, opts) {
+  stopPlayback(); // animate.js — a live rAF loop mutating .anim-wrap styles
+  // mid-capture would race every capture path below (live preview and GIF
+  // sampling both touch the exact same DOM nodes).
   if (type === "svg") {
     for (const p of selectedPages) {
       download(new Blob([serializeSVGFrom(p.svgEl)], { type: "image/svg+xml" }), `${projectName()}-${slugifyPageName(p.name)}.svg`);
@@ -312,10 +317,69 @@ async function downloadGifForPages(selectedPages, { seconds }) {
   flashStatus(`Downloaded ${projectName()}.gif`);
 }
 
+// Routes to whichever capture strategy a page actually needs. Shape/text
+// enter-exit animations (animate.js) take priority over embedded animated
+// GIFs when a page has both, because the two need fundamentally different
+// capture mechanics (see capturePageFramesForShapeAnim's header) that can't
+// both be satisfied in one pass: a page combining an animated GIF import AND
+// an object with an enter/exit effect will export correctly for the
+// enter/exit animation, but the embedded GIF will appear frozen near its
+// first frame in that output. Flagged, not silently picked — there's no
+// good general fix short of a full off-screen video-style compositor, which
+// felt like more machinery than this app's scope needs.
+async function capturePageFrames(page, { fps, seconds }) {
+  const hasShapeAnim = collectAnimatedObjects(page.doc).length > 0;
+  if (hasShapeAnim) return capturePageFramesForShapeAnim(page, { fps });
+  return capturePageFramesLive(page, { fps, seconds });
+}
+
+// Shape/text enter-exit animations (animate.js) are JS-computed, not CSS
+// keyframes, so there's no "just let it play and sample it" path the way
+// capturePageFramesLive() does for embedded GIFs — instead, each output
+// frame is produced by directly setting the .anim-wrap inline styles for
+// that exact elapsed time on the page's real (live) <svg>, serializing THAT
+// state to markup, and rasterizing a fresh <img> from it. This is exactly
+// the deterministic-state approach animate.js's header describes: live Play
+// and this capture path both call objectAnimState() and get identical
+// results for identical elapsed times. Frame count/duration are derived
+// from the animation's own natural cycle length, not the user's "seconds"
+// field (which only makes sense for a GIF import whose true duration this
+// app can't otherwise know).
+async function capturePageFramesForShapeAnim(page, { fps }) {
+  const w = page.doc.width, h = page.doc.height;
+  const matte = page.doc.background || "#ffffff";
+  const animated = collectAnimatedObjects(page.doc);
+  const holdMs = page.doc.animHold ?? 1500;
+  const cycleMs = Math.max(1, ...animated.map(o => cycleLength(o, holdMs)));
+  const delayMs = 1000 / fps;
+  const frameCount = Math.max(1, Math.round(cycleMs / delayMs));
+
+  const raster = document.createElement("canvas");
+  raster.width = w; raster.height = h;
+  const ctx = raster.getContext("2d");
+
+  const frames = [];
+  for (let i = 0; i < frameCount; i++) {
+    const t = i * delayMs;
+    for (const obj of animated) {
+      const wrap = page.svgEl.querySelector(`.anim-wrap[data-anim-for="${obj.id}"]`);
+      applyAnimState(wrap, objectAnimState(obj, t, holdMs));
+    }
+    const img = await loadImageOffscreen(serializeSVGFrom(page.svgEl));
+    ctx.fillStyle = matte;
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    frames.push(ctx.getImageData(0, 0, w, h));
+    img.remove();
+  }
+  resetAnimStyles(page.svgEl); // don't leave the live canvas mid-animation after capture
+  return { frames, delayMs, width: w, height: h };
+}
+
 // Pages with no animated object only need one frame, held for the full
 // duration — sampling N identical frames would just bloat the file for no
 // visual difference.
-async function capturePageFrames(page, { fps, seconds }) {
+async function capturePageFramesLive(page, { fps, seconds }) {
   const hasAnimated = page.doc.layers.some(l => l.objects.some(o => o.animated));
   const w = page.doc.width, h = page.doc.height;
   const matte = page.doc.background || "#ffffff";

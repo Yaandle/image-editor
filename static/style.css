@@ -84,8 +84,9 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
 .toolbar-sep {
   width:2px; height:22px; background:var(--border-hairline); flex:none;
 }
-#project-controls, #export-controls { display:flex; gap:6px; align-items:center; }
+#project-controls, #export-controls, #playback-controls { display:flex; gap:6px; align-items:center; }
 #export-controls { margin-left:auto; }
+#btn-play.playing { background:var(--accent2); color:#fff; }
 
 /* editable project name — borderless until focused */
 #project-name {
@@ -173,6 +174,12 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
 .page-canvas [data-id]:not(.broken-image-placeholder) { cursor:move; }
 
 #btn-add-page { flex:none; width:220px; }
+
+/* anim-wrap: fill-box + center origin so scale/rotate animations (animate.js)
+   pivot around the object's own bounding box instead of the SVG viewport's
+   0,0 — SVG elements default to a viewBox-relative transform origin, which
+   is wrong for per-object effects. */
+.anim-wrap { transform-box:fill-box; transform-origin:center; }
 
 /* canvas-drawn overlay UI — blue selection language, square handles */
 .selection-box {
@@ -305,6 +312,10 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
 .primary-action { background:var(--accent); color:#111; }
 .primary-action:hover { background:var(--accent); filter:brightness(1.05); }
 
+.prop-hint {
+  margin:0; font-size:9px; color:var(--text-faint); line-height:1.4;
+}
+
 /* ---- layers ------------------------------------------------------------ */
 
 #layers-list {
@@ -357,6 +368,13 @@ input:focus, select:focus { outline:none; box-shadow:var(--shadow-sm); }
   background:var(--accent2); flex:none;
 }
 #status-dot.connected { background:var(--accent-green); }
+#zoom-controls { display:flex; align-items:center; gap:4px; }
+#zoom-controls button {
+  width:16px; height:16px; line-height:1; padding:0;
+  font-size:11px; display:flex; align-items:center; justify-content:center;
+}
+#btn-zoom-reset { width:auto; padding:0 6px; font-size:9px; }
+#zoom-label { min-width:34px; text-align:center; font-variant-numeric:tabular-nums; }
 #status-hint { margin-left:auto; }
 
 /* ---- toast ------------------------------------------------------------- */

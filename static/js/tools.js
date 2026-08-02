@@ -185,6 +185,13 @@ document.getElementById("btn-reset-adjustments").addEventListener("click", () =>
 // underneath the cursor once pages are stacked vertically.
 function bindPageEvents(svgEl) {
   svgEl.addEventListener("pointerdown", e => {
+    // animate.js's live Play loop repositions .anim-wrap elements every
+    // frame via CSS transform — a transform that getBBox() (local space)
+    // correctly ignores but that the actual on-screen position doesn't.
+    // Interacting mid-playback would make selection handles target where an
+    // object rests, not where it's currently animated to, so stop playback
+    // the moment editing starts rather than let the two fight.
+    if (typeof isPlaying === "function" && isPlaying()) stopPlayback();
     activatePageFromEvent(e);
     svgEl.setPointerCapture(e.pointerId);
     tools[currentTool]?.down(e);

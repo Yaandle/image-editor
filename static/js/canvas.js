@@ -23,6 +23,15 @@ function renderDoc() {
   canvasEl.setAttribute("width", doc.width);
   canvasEl.setAttribute("height", doc.height);
   canvasEl.setAttribute("viewBox", `0 0 ${doc.width} ${doc.height}`);
+  // Zoom (pages.js's viewZoom) is applied as a CSS size, not a CSS transform —
+  // transform wouldn't affect layout, so the page-stack wouldn't reflow/scroll
+  // correctly as you zoom. Setting the rendered CSS size while the SVG's own
+  // width/height attrs (above) stay at the true doc size means viewBox does
+  // the scaling — and since toDocPoint()/toScreenPoint() already go through
+  // getScreenCTM(), which reflects whatever size the browser is actually
+  // rendering the element at, zoom needs zero changes to any pointer math.
+  canvasEl.style.width = (doc.width * viewZoom) + "px";
+  canvasEl.style.height = (doc.height * viewZoom) + "px";
   canvasEl.innerHTML = "";
 
   // Background fill (doc.background) — a plain rect, not a layer object:
@@ -44,7 +53,7 @@ function renderDoc() {
     const g = document.createElementNS(svgNS, "g");
     g.dataset.layerId = layer.id;
     if (layer.id === doc.activeLayerId) g.dataset.activeLayer = "true";
-    for (const obj of layer.objects) g.appendChild(buildElement(obj));
+    for (const obj of layer.objects) g.appendChild(wrapForAnim(buildElement(obj), obj));
     canvasEl.appendChild(g);
   }
 
@@ -67,6 +76,11 @@ function renderDoc() {
   // since that function early-returns when the selection is empty and these
   // cards need to hide again in exactly that case.
   syncSelectionDependentPanels();
+
+  // panels.js — Animate card (per-object enter/exit config). Own hook
+  // rather than folding into syncSelectionDependentPanels() since it shows
+  // for every object type, not just images like Adjustments/Crop.
+  syncAnimPanel();
 }
 
 // Splits out of renderDoc() so tools.js can call it standalone after a
@@ -174,6 +188,26 @@ function buildBrokenImagePlaceholder(obj) {
   const deg = getRotation(obj);
   if (deg) { g.dataset.pendingTransform = "1"; g.dataset.pendingRot = deg; }
   return g;
+}
+
+// Wraps an object's rendered element in a <g class="anim-wrap"> when (and
+// only when) it actually has an enter/exit animation assigned — animate.js
+// applies opacity/transform/filter to this wrapper during Play/GIF capture,
+// deliberately never to the object's own element. Reason: rotation/flip
+// (applyPendingTransforms, above) already put an SVG transform ATTRIBUTE on
+// that element, and a CSS transform PROPERTY on the same element would win
+// over it per spec, silently discarding the rotation/flip. A separate
+// ancestor node sidesteps the conflict entirely — animate.js only ever
+// touches the wrapper's *style*, never its attributes. Objects with no
+// animation skip the wrapper altogether, so the common case (nothing
+// animated) adds zero extra DOM.
+function wrapForAnim(el, obj) {
+  if (!objectHasAnim(obj)) return el;
+  const wrap = document.createElementNS(svgNS, "g");
+  wrap.setAttribute("class", "anim-wrap");
+  wrap.dataset.animFor = obj.id;
+  wrap.appendChild(el);
+  return wrap;
 }
 
 // num() is defined once, in document.js — was duplicated verbatim here too.

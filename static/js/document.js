@@ -37,7 +37,15 @@ function uid() {
 // channel.
 function makeBlankDoc(width = 900, height = 600) {
   const layer = { id: uid(), name: "Layer 1", visible: true, objects: [] };
-  return { width, height, background: null, layers: [layer], activeLayerId: layer.id, selectedIds: [] };
+  return {
+    width, height, background: null, layers: [layer], activeLayerId: layer.id, selectedIds: [],
+    // animHold/animLoop: playback timing for enter/exit animations (animate.js)
+    // — a page-level setting (how long objects stay fully shown between
+    // entering and exiting, and whether the cycle repeats), not per-object.
+    // Per-object timing (which effect, duration, delay, easing) lives on
+    // obj.anim instead — see the "animation" section below.
+    animHold: 1500, animLoop: true,
+  };
 }
 
 // Clears undo/redo and re-baselines lastCommitted to the current doc.
@@ -150,6 +158,8 @@ function duplicateObject(id, offset = 10) {
   // not a real SVG attribute — copy it explicitly or a duplicated GIF loses
   // its "don't flood-fill me" flag.
   if (found.obj.animated) clone.animated = true;
+  // enter/exit animation (see below) — same reasoning, it's not an attr.
+  if (found.obj.anim) clone.anim = JSON.parse(JSON.stringify(found.obj.anim));
   nudgeObject(clone, offset, offset);
   found.layer.objects.push(clone);
   return clone;
@@ -224,6 +234,36 @@ function toggleFlip(obj, axis) {
 
 function bboxCenter(bbox) {
   return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+}
+
+// ---- animation (enter/exit) -----------------------------------------------
+// obj.anim = { enter: {type,duration,delay,easing}, exit: {type,duration,delay,easing} }.
+// Undefined until an object actually has an animation assigned — most
+// objects never carry this, same sparse-attrs convention as obj.animated
+// (the GIF-import tag) above. type "none" (the default) means that phase is
+// off. See animate.js for how these values get turned into a live opacity/
+// transform/filter state each frame, and canvas.js's wrapForAnim() for why
+// they're applied to a wrapper <g> rather than the object's own element.
+
+const ANIM_PHASE_DEFAULTS = { type: "none", duration: 500, delay: 0, easing: "ease-out" };
+
+function ensureAnim(obj) {
+  if (!obj.anim) obj.anim = { enter: { ...ANIM_PHASE_DEFAULTS }, exit: { ...ANIM_PHASE_DEFAULTS } };
+  return obj.anim;
+}
+
+function objectHasAnim(obj) {
+  return !!obj.anim && (obj.anim.enter?.type !== "none" || obj.anim.exit?.type !== "none");
+}
+
+// Merges a patch into one phase ("enter"/"exit") of an object's anim config,
+// creating the block on first use and dropping it again once both phases are
+// back to "none" — so clicking a phase's type to None and never touching it
+// again doesn't leave a dead {enter:{type:"none"...}} block in every export.
+function setObjectAnimPhase(obj, phase, patch) {
+  const anim = ensureAnim(obj);
+  Object.assign(anim[phase], patch);
+  if (anim.enter.type === "none" && anim.exit.type === "none") delete obj.anim;
 }
 
 // ---- object z-order --------------------------------------------------

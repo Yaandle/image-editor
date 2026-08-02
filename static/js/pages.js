@@ -17,6 +17,34 @@
 let pages = [];
 let activePageId = null;
 
+// ---------------------------------------------------------------------
+// zoom — a single view setting shared across every page (consistent with
+// tool state/color picker also being shared, not per-page). Applied via
+// canvas.js's renderDoc() reading this global; see that function for why
+// it's a CSS size rather than a CSS transform.
+// ---------------------------------------------------------------------
+
+let viewZoom = 1;
+const ZOOM_MIN = 0.1, ZOOM_MAX = 4;
+
+function setZoom(z) {
+  viewZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  // Deliberately NOT renderAllPages() here — that rebuilds every page's DOM
+  // from scratch, which a rapid-fire trackpad pinch/scroll gesture would call
+  // dozens of times a second. Zoom is a pure CSS size change, so just apply
+  // that directly; renderDoc() (canvas.js) re-applies it from `viewZoom` on
+  // every real content render anyway, so this never goes stale after an edit.
+  for (const page of pages) {
+    page.svgEl.style.width = (page.doc.width * viewZoom) + "px";
+    page.svgEl.style.height = (page.doc.height * viewZoom) + "px";
+  }
+  updateZoomLabel();
+}
+
+function resetZoom() {
+  setZoom(1);
+}
+
 function getPage(id) {
   return pages.find(p => p.id === id) || null;
 }
@@ -141,6 +169,10 @@ function removePage(id) {
   if (pages.length <= 1) { flashStatus("Can't delete the only page"); return; }
   const idx = pages.findIndex(p => p.id === id);
   if (idx < 0) return;
+  // animate.js's live Play loop keeps a direct reference to whichever page
+  // it started on — stop it before that page's svgEl gets removed from the
+  // DOM, rather than leaving a dangling rAF loop querying a detached node.
+  if (typeof playingPage !== "undefined" && playingPage?.id === id) stopPlayback();
   const [removed] = pages.splice(idx, 1);
   removed.wrapEl.remove();
   if (activePageId === id) {
