@@ -9,9 +9,21 @@ document.querySelectorAll(".tool").forEach(btn => btn.addEventListener("click", 
 document.getElementById("btn-undo").addEventListener("click", undo);
 document.getElementById("btn-redo").addEventListener("click", redo);
 
+function updateUndoRedoButtons() {
+  document.getElementById("btn-undo").disabled = !canUndo();
+  document.getElementById("btn-redo").disabled = !canRedo();
+}
+
 document.getElementById("btn-add-layer").addEventListener("click", () => {
   addLayer();
   pushUndo(); renderLayers(); renderDoc();
+});
+
+// penSmoothing (tools.js) already existed and buildPencilPath() already
+// branched on it — nothing ever actually let the user flip it. Real toggle,
+// not undo-tracked (a drawing preference, not document content).
+document.getElementById("pencil-smoothing")?.addEventListener("change", e => {
+  penSmoothing = e.target.checked;
 });
 
 // ---------------------------------------------------------------------

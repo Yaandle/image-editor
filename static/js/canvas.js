@@ -55,6 +55,11 @@ function renderDoc() {
   // doc.width/doc.height after resize, undo/redo, load, or new-document.
   // Same single-hook approach as syncPropertyPanelToSelection() below.
   syncCanvasPropertiesPanel();
+
+  // canUndo()/canRedo() (document.js) existed but nothing ever called them —
+  // the Undo/Redo buttons stayed permanently clickable even with an empty
+  // stack. Same single-render-hook pattern as the two syncs above.
+  updateUndoRedoButtons();
 }
 
 // Splits out of renderDoc() so tools.js can call it standalone after a
@@ -120,9 +125,7 @@ function buildBrokenImagePlaceholder(obj) {
   return g;
 }
 
-function num(v) {
-  return typeof v === "number" ? v : parseFloat(v) || 0;
-}
+// num() is defined once, in document.js — was duplicated verbatim here too.
 
 // ---- selection overlay ---------------------------------------------------
 

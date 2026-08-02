@@ -143,6 +143,11 @@ function updateHoverCursor(e) {
 function cancelDrag() {
   if (dragState?.snapshot) {
     doc = JSON.parse(dragState.snapshot);
+    // Multi-page: reassigning `doc` here breaks its aliasing with the active
+    // page's stored record (pages.js) — without this, the page record would
+    // keep the half-finished drag state even though the visible canvas
+    // reverted, and it would resurface next time you switched pages or saved.
+    syncActivePageDoc();
   }
   document.getElementById("marquee-box")?.remove();
   dragState = null;
