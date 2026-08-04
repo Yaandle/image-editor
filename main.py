@@ -1,7 +1,7 @@
 import json
 import re
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, WebSocket
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -51,6 +51,17 @@ def delete_project(name: str):
     if path.exists():
         path.unlink()
     return {"ok": True}
+
+
+# imagekit itself never opens a WebSocket (project save/load is plain
+# fetch()) — this only exists so a stray WS handshake from a browser
+# extension or dev tool doesn't fall through to StaticFiles below, which
+# only handles "http" scope and raises an unhandled AssertionError on
+# "websocket" scope. Registered before the static mount so it wins the
+# route match for any path when the connection is actually a WebSocket.
+@app.websocket("/{path:path}")
+async def reject_websocket(websocket: WebSocket, path: str):
+    await websocket.close(code=1000)
 
 
 # mounted last so /api/* routes above take priority

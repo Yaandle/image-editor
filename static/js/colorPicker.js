@@ -209,7 +209,16 @@ export function createColorPicker(containerEl, { initialColor = '#ffffff', onCha
   noneSwatchBtn.textContent = '⌀';
   noneSwatchBtn.addEventListener('click', () => {
     isNone = true;
+    // The trigger swatch's background is set as an inline style every emit()
+    // (needed so it can show an arbitrary hex, which no CSS class enumerates)
+    // — inline style always wins specificity over a class selector, so
+    // .is-none's checkerboard-pattern background was being silently
+    // overridden by whatever hex was last set. Clearing it here lets the
+    // class's background show through, same as picking any other swatch
+    // visibly updates the trigger.
+    swatchBtn.style.background = '';
     swatchBtn.classList.add('is-none');
+    hexInput.value = '';
     onNone();
     popover.style.display = 'none';
   });
