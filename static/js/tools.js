@@ -257,6 +257,15 @@ function cancelDrag() {
 
 let penSmoothing = true; // toggled via panels.js — see "smoothing toggle hookup" note
 
+// Auto-selecting a freshly-drawn pen/pencil stroke (bounding box + handles
+// appearing immediately) is useful for moving/resizing it right away, but
+// gets in the way of drawing several strokes back to back — each one forces
+// a click elsewhere (or an Escape) to clear the box before the next stroke
+// can start. Toggled off from the Properties panel's Drawing card
+// (panels.js) for a plainer, uninterrupted sketching flow; still defaults
+// to on since it's the existing, expected behavior for every other tool.
+let penAutoSelect = true;
+
 function buildPencilPath(points) {
   if (points.length < 2) return "";
   if (!penSmoothing) {
@@ -509,7 +518,10 @@ const tools = {
         // every pen stroke ended up auto-filled with the current fill
         // colour instead of staying an open path.
         const obj = addObject({ id: uid(), type: "path", attrs: { ...currentStyle(), d, fill: "none" } });
-        selectOnly(obj.id);
+        // See penAutoSelect's definition above — off means the stroke is
+        // committed but left unselected, so no bounding box interrupts the
+        // next one.
+        if (penAutoSelect) selectOnly(obj.id); else clearSelection();
         pushUndo();
       }
       this.points = [];
@@ -566,7 +578,9 @@ const tools = {
         // same clobbering bug as pen.finish() — fill must be forced after
         // the spread, otherwise the current fill colour silently wins.
         const obj = addObject({ id: uid(), type: "path", attrs: { ...currentStyle(), d, fill: "none" } });
-        selectOnly(obj.id);
+        // Same penAutoSelect toggle as pen.finish() — one setting covers
+        // both freehand tools.
+        if (penAutoSelect) selectOnly(obj.id); else clearSelection();
         pushUndo();
       }
       this.points = [];

@@ -26,6 +26,13 @@ document.getElementById("pencil-smoothing")?.addEventListener("change", e => {
   penSmoothing = e.target.checked;
 });
 
+// Drawing card (Properties panel) — auto-select toggle for Pen/Pencil, see
+// tools.js's penAutoSelect definition. A drawing preference, not document
+// content, so not undo-tracked — same treatment as pencil-smoothing above.
+document.getElementById("draw-auto-select")?.addEventListener("change", e => {
+  penAutoSelect = e.target.checked;
+});
+
 // ---------------------------------------------------------------------
 // Arrange panel — align / distribute / flip (tools.js)
 // ---------------------------------------------------------------------
