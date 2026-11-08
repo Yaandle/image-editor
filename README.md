@@ -11,8 +11,7 @@ Features:
 - Export system
 
 ---
-![Menu](/static/menu.png)
-
+![Menu](static/menu.png)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
