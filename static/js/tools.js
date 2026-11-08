@@ -121,6 +121,9 @@ function syncSelectionDependentPanels() {
     "adj-contrast": firstObj.attrs.contrast ?? 100,
     "adj-saturate": firstObj.attrs.saturate ?? 100,
     "adj-grayscale": firstObj.attrs.grayscale ?? 0,
+    "adj-blur": firstObj.attrs.blur ?? 0,
+    "adj-pixelate": firstObj.attrs.pixelate ?? 0,
+    "adj-noise": firstObj.attrs.noise ?? 0,
   };
   for (const [id, val] of Object.entries(fields)) {
     const el = document.getElementById(id);
@@ -143,6 +146,9 @@ function currentAdjustmentValues() {
     contrast: document.getElementById("adj-contrast").value,
     saturate: document.getElementById("adj-saturate").value,
     grayscale: document.getElementById("adj-grayscale").value,
+    blur: document.getElementById("adj-blur").value,
+    pixelate: document.getElementById("adj-pixelate").value,
+    noise: document.getElementById("adj-noise").value,
     invert: document.getElementById("adj-invert").checked ? 100 : 0,
   };
 }
@@ -160,7 +166,7 @@ function applyAdjustment(commit) {
   if (commit) pushUndo();
 }
 
-["adj-brightness", "adj-contrast", "adj-saturate", "adj-grayscale"].forEach(id => {
+["adj-brightness", "adj-contrast", "adj-saturate", "adj-grayscale", "adj-blur", "adj-pixelate", "adj-noise"].forEach(id => {
   document.getElementById(id).addEventListener("input", () => applyAdjustment(false));
   document.getElementById(id).addEventListener("change", () => applyAdjustment(true));
 });
@@ -171,6 +177,9 @@ document.getElementById("btn-reset-adjustments").addEventListener("click", () =>
   document.getElementById("adj-contrast").value = 100;
   document.getElementById("adj-saturate").value = 100;
   document.getElementById("adj-grayscale").value = 0;
+  document.getElementById("adj-blur").value = 0;
+  document.getElementById("adj-pixelate").value = 0;
+  document.getElementById("adj-noise").value = 0;
   document.getElementById("adj-invert").checked = false;
   applyAdjustment(true);
 });
@@ -408,8 +417,21 @@ const tools = {
 
       // clamp the pointer itself to the canvas first — this is the cheapest
       // point to stop overflow, before any per-object math runs
-      const clampedX = Math.min(Math.max(p.x, 0), doc.width);
-      const clampedY = Math.min(Math.max(p.y, 0), doc.height);
+      let clampedX = Math.min(Math.max(p.x, 0), doc.width);
+      let clampedY = Math.min(Math.max(p.y, 0), doc.height);
+
+      // Snap the dragged corner to the canvas edges/center — same targets
+      // and threshold applySnapGuides() already uses for moving a
+      // selection. Resize previously had zero snapping, which made it
+      // effectively impossible to land a corner exactly on a canvas edge by
+      // freehand mouse precision alone — e.g. resizing an image to exactly
+      // fill the canvas, or lining up a second corner squarely in place.
+      const vTargets = [0, doc.width / 2, doc.width];
+      const hTargets = [0, doc.height / 2, doc.height];
+      let vAt = null, hAt = null;
+      for (const vt of vTargets) if (Math.abs(clampedX - vt) <= SNAP_THRESHOLD) { clampedX = vt; vAt = vt; break; }
+      for (const ht of hTargets) if (Math.abs(clampedY - ht) <= SNAP_THRESHOLD) { clampedY = ht; hAt = ht; break; }
+      drawSnapGuides(vAt, hAt);
 
       let newW = Math.max(1, Math.abs(clampedX - fx));
       let newH = Math.max(1, Math.abs(clampedY - fy));

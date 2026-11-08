@@ -10,6 +10,10 @@ Features:
 - Colour controls
 - Export system
 
+---
+![Menu](./static/menu.png)
+
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ toolbar                                                      │
